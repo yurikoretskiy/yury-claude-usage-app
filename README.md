@@ -1,4 +1,4 @@
-# Uri Claude Usage App v1 — Handover
+# Yury Claude Usage App v1
 
 ## What It Is
 A macOS menu bar widget that shows your Claude Pro subscription usage at a glance — no need to open claude.ai to check how much you've used.

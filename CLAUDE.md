@@ -1,4 +1,4 @@
-# Uri Claude Usage App — Project Guide
+# Yury Claude Usage App — Project Guide
 
 ## What This Is
 A native macOS menu bar widget that displays real-time Claude Pro subscription usage (current session % and weekly %). Built with Swift/SwiftUI using `MenuBarExtra`. No dock icon — lives entirely in the menu bar.
