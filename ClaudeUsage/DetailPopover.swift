@@ -3,18 +3,15 @@ import SwiftUI
 struct DetailPopover: View {
     @ObservedObject var usageService: UsageService
 
-    // Claude.ai blue for progress bars
-    private let claudeBlue = Color(red: 0.35, green: 0.52, blue: 0.85)
-    private let barBg = Color(red: 0.90, green: 0.91, blue: 0.93)
-    private let textPrimary = Color(red: 0.12, green: 0.12, blue: 0.12)
-    private let textSecondary = Color(red: 0.45, green: 0.45, blue: 0.50)
+    // Orange accent for progress bars (matches menu bar widget)
+    private let accentOrange = Color(red: 1.0, green: 0.6, blue: 0.0)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Plan usage limits header
             Text("Plan usage limits")
                 .font(.system(size: 16, weight: .bold))
-                .foregroundColor(textPrimary)
+                .foregroundColor(.primary)
                 .padding(.bottom, 16)
 
             // Error state
@@ -25,7 +22,7 @@ struct DetailPopover: View {
                         .font(.caption)
                     Text(error)
                         .font(.caption)
-                        .foregroundColor(textSecondary)
+                        .foregroundColor(.secondary)
                 }
                 .padding(.bottom, 12)
             }
@@ -34,28 +31,27 @@ struct DetailPopover: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Current session")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(textPrimary)
+                    .foregroundColor(.primary)
 
                 Text(sessionResetLabel)
                     .font(.system(size: 13))
-                    .foregroundColor(textSecondary)
+                    .foregroundColor(.secondary)
 
                 HStack(spacing: 12) {
-                    // Progress bar
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(barBg)
+                                .fill(Color.secondary.opacity(0.2))
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(claudeBlue)
+                                .fill(accentOrange)
                                 .frame(width: max(0, geo.size.width * min(usageService.usage.sessionPercent, 100) / 100))
                         }
                     }
-                    .frame(height: 10)
+                    .frame(height: 8)
 
                     Text("\(Int(round(usageService.usage.sessionPercent)))% used")
                         .font(.system(size: 13))
-                        .foregroundColor(textSecondary)
+                        .foregroundColor(.secondary)
                         .fixedSize()
                 }
                 .padding(.top, 4)
@@ -68,32 +64,32 @@ struct DetailPopover: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Weekly limits")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(textPrimary)
+                    .foregroundColor(.primary)
 
                 Text("All models")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(textPrimary)
+                    .foregroundColor(.primary)
                     .padding(.top, 4)
 
                 Text(weeklyResetLabel)
                     .font(.system(size: 13))
-                    .foregroundColor(textSecondary)
+                    .foregroundColor(.secondary)
 
                 HStack(spacing: 12) {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(barBg)
+                                .fill(Color.secondary.opacity(0.2))
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(claudeBlue)
+                                .fill(accentOrange)
                                 .frame(width: max(0, geo.size.width * min(usageService.usage.weeklyPercent, 100) / 100))
                         }
                     }
-                    .frame(height: 10)
+                    .frame(height: 8)
 
                     Text("\(Int(round(usageService.usage.weeklyPercent)))% used")
                         .font(.system(size: 13))
-                        .foregroundColor(textSecondary)
+                        .foregroundColor(.secondary)
                         .fixedSize()
                 }
                 .padding(.top, 4)
@@ -107,7 +103,7 @@ struct DetailPopover: View {
                 if let lastFetched = usageService.usage.lastFetched {
                     Text("Last updated: \(lastFetched, style: .relative) ago")
                         .font(.system(size: 12))
-                        .foregroundColor(textSecondary)
+                        .foregroundColor(.secondary)
                 }
 
                 Spacer()
@@ -115,7 +111,7 @@ struct DetailPopover: View {
                 Button(action: { usageService.refreshNow() }) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12))
-                        .foregroundColor(textSecondary)
+                        .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
             }
@@ -128,7 +124,7 @@ struct DetailPopover: View {
             }) {
                 Text("Quit")
                     .font(.system(size: 12))
-                    .foregroundColor(textSecondary)
+                    .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
         }

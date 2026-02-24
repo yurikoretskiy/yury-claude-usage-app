@@ -1,5 +1,21 @@
 import Foundation
 
+private extension Data {
+    init?(hexString: String) {
+        let len = hexString.count
+        guard len % 2 == 0 else { return nil }
+        var data = Data(capacity: len / 2)
+        var index = hexString.startIndex
+        while index < hexString.endIndex {
+            let nextIndex = hexString.index(index, offsetBy: 2)
+            guard let byte = UInt8(hexString[index..<nextIndex], radix: 16) else { return nil }
+            data.append(byte)
+            index = nextIndex
+        }
+        self = data
+    }
+}
+
 struct OAuthCredentials {
     let accessToken: String
     let refreshToken: String
@@ -18,15 +34,17 @@ enum KeychainHelper {
             return cached
         }
 
-        // Use the `security` CLI tool — this avoids the GUI password prompt
-        // because the terminal/shell already has keychain access granted
+        // Use `security -g` which outputs the full hex password on stderr.
+        // The `-w` flag truncates large passwords (~2010 bytes), breaking
+        // JSON parsing when credentials are hex-encoded.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-g"]
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe() // suppress stderr
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
 
         do {
             try process.run()
@@ -41,23 +59,85 @@ enum KeychainHelper {
             return nil
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let rawString = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !rawString.isEmpty else {
+        // `-g` outputs the password on stderr
+        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: errData, encoding: .utf8), !output.isEmpty else {
             print("Empty keychain data")
             return nil
         }
 
-        guard let jsonData = rawString.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
-            print("Failed to parse keychain JSON")
+        let decoded = decodeKeychainOutput(output)
+        guard let decoded = decoded, !decoded.isEmpty else {
+            print("Could not decode keychain password")
             return nil
         }
 
-        let credentials = extractCredentials(from: json)
+        // Try full JSON parse first (works if data isn't truncated)
+        if let jsonData = decoded.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+            let credentials = extractCredentials(from: json)
+            cachedCredentials = credentials
+            cacheTime = Date()
+            return credentials
+        }
+
+        // Fallback: extract token via regex (handles truncated JSON)
+        let credentials = extractCredentialsViaRegex(from: decoded)
         cachedCredentials = credentials
         cacheTime = Date()
         return credentials
+    }
+
+    /// Decode the password line from `security -g` output.
+    /// Format is either `password: 0x<HEX><trailing>` or `password: "<string>"`.
+    private static func decodeKeychainOutput(_ output: String) -> String? {
+        // Hex-encoded password (newer macOS / Claude Code versions)
+        if let match = output.range(of: #"password: 0x([0-9A-Fa-f]+)(.*)"#, options: .regularExpression) {
+            let line = String(output[match])
+            // Extract hex portion
+            if let hexRange = line.range(of: #"0x([0-9A-Fa-f]+)"#, options: .regularExpression) {
+                let hexWithPrefix = String(line[hexRange])
+                let hex = String(hexWithPrefix.dropFirst(2))
+                guard let data = Data(hexString: hex),
+                      let decoded = String(data: data, encoding: .utf8) else { return nil }
+                // Append any trailing text after the hex (security CLI may include it)
+                let afterHex = String(line[hexRange.upperBound...])
+                return decoded + afterHex
+            }
+        }
+        // Plain string password
+        if let match = output.range(of: #"password: "(.*)""#, options: .regularExpression) {
+            let line = String(output[match])
+            let start = line.index(line.startIndex, offsetBy: 11) // skip `password: "`
+            let end = line.index(before: line.endIndex)            // skip trailing `"`
+            return String(line[start..<end])
+        }
+        return nil
+    }
+
+    /// Extract credentials via regex when JSON is truncated.
+    private static func extractCredentialsViaRegex(from text: String) -> OAuthCredentials? {
+        guard let tokenMatch = text.range(of: #""accessToken"\s*:\s*"(sk-ant-[^"]+)""#, options: .regularExpression) else {
+            print("Missing accessToken in keychain data")
+            return nil
+        }
+        // Extract the token value from the match
+        let matchStr = String(text[tokenMatch])
+        guard let valueStart = matchStr.range(of: "sk-ant-"),
+              let valueEnd = matchStr.lastIndex(of: "\"") else { return nil }
+        let accessToken = String(matchStr[valueStart.lowerBound..<valueEnd])
+
+        // Try to extract refreshToken
+        var refreshToken = ""
+        if let rtMatch = text.range(of: #""refreshToken"\s*:\s*"(sk-ant-[^"]+)""#, options: .regularExpression) {
+            let rtStr = String(text[rtMatch])
+            if let rtStart = rtStr.range(of: "sk-ant-"),
+               let rtEnd = rtStr.lastIndex(of: "\"") {
+                refreshToken = String(rtStr[rtStart.lowerBound..<rtEnd])
+            }
+        }
+
+        return OAuthCredentials(accessToken: accessToken, refreshToken: refreshToken, expiresAt: nil)
     }
 
     /// Clear cached credentials (call when token is expired)
