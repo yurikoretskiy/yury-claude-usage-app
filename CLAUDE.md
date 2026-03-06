@@ -22,7 +22,7 @@ ClaudeUsage/
 
 ## Data Flow
 1. `KeychainHelper` reads OAuth token from `Claude Code-credentials` keychain entry
-2. `UsageService` calls `GET https://api.anthropic.com/api/oauth/usage` with Bearer token
+2. `UsageService` calls `GET https://api.anthropic.com/api/oauth/usage` with Bearer token and `User-Agent: claude-code/X.X.X` header (required by Cloudflare)
 3. API returns `{ five_hour: { utilization: 55.0, resets_at: "..." }, seven_day: { ... } }`
 4. `MenuBarRenderer` generates an NSImage from the session percentage
 5. `DetailPopover` shows full breakdown when user clicks the widget
@@ -33,6 +33,8 @@ ClaudeUsage/
 - **SPM over Xcode project** — simpler, no .xcodeproj files, builds with `swift build`
 - **NSImage rendering** — MenuBarExtra label only accepts Image+Text, so the entire widget (logo + bar + %) is rendered as a single NSImage
 - **LSUIElement = true** — no dock icon, menu bar only
+- **User-Agent header** — Anthropic's API requires `User-Agent: claude-code/X.X.X` or Cloudflare blocks with 429
+- **429 backoff** — exponential backoff (60s→120s→240s→300s max) on rate limit, resets to 60s on success
 
 ## Build & Run
 ```bash

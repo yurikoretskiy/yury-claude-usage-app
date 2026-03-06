@@ -17,6 +17,8 @@ class UsageService: ObservableObject {
 
     private var timer: Timer?
     private var refreshInterval: TimeInterval = 60
+    private let defaultInterval: TimeInterval = 60
+    private let maxInterval: TimeInterval = 300
 
     init() {
         startPolling()
@@ -56,6 +58,7 @@ class UsageService: ObservableObject {
         request.httpMethod = "GET"
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("claude-code/2.1.63", forHTTPHeaderField: "User-Agent")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -76,6 +79,15 @@ class UsageService: ObservableObject {
                 return
             }
 
+            if httpResponse.statusCode == 429 {
+                // Back off on rate limit, keep showing cached data
+                refreshInterval = min(refreshInterval * 2, maxInterval)
+                startPolling()
+                let cachedNote = usage.lastFetched != nil ? " (showing cached data)" : ""
+                usage.error = "Rate limited — retrying in \(Int(refreshInterval))s\(cachedNote)"
+                return
+            }
+
             guard httpResponse.statusCode == 200 else {
                 usage.error = "API error: HTTP \(httpResponse.statusCode)"
                 return
@@ -89,6 +101,12 @@ class UsageService: ObservableObject {
             parseUsageResponse(json)
             usage.lastFetched = Date()
             usage.error = nil
+
+            // Reset polling interval on success
+            if refreshInterval != defaultInterval {
+                refreshInterval = defaultInterval
+                startPolling()
+            }
 
         } catch {
             usage.error = "Network error: \(error.localizedDescription)"
