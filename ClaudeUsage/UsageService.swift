@@ -31,9 +31,11 @@ class UsageService: ObservableObject {
         startPolling()
     }
 
-    func startPolling() {
+    func startPolling(fetchImmediately: Bool = true) {
         timer?.invalidate()
-        Task { await fetchUsage() }
+        if fetchImmediately {
+            Task { await fetchUsage() }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.fetchUsage()
@@ -125,7 +127,7 @@ class UsageService: ObservableObject {
 
                 // Retry also failed — back off silently if we have cached data
                 refreshInterval = min(refreshInterval * 2, maxInterval)
-                startPolling()
+                startPolling(fetchImmediately: false)
                 if usage.lastFetched == nil {
                     usage.error = "Rate limited — retrying in \(Int(refreshInterval))s"
                 }
@@ -175,7 +177,7 @@ class UsageService: ObservableObject {
 
             // Both attempts failed — backoff, show error only if no cached data
             refreshInterval = min(refreshInterval * 2, maxInterval)
-            startPolling()
+            startPolling(fetchImmediately: false)
             if usage.lastFetched == nil {
                 usage.error = "Network error: \(error.localizedDescription)"
             }
