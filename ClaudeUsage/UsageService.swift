@@ -72,6 +72,10 @@ class UsageService: ObservableObject {
     }
 
     func fetchUsage() async {
+        guard !isLoading else {
+            cuLog("fetchUsage skipped, already in progress")
+            return
+        }
         cuLog("fetchUsage called, interval=\(Int(refreshInterval))")
         guard let credentials = KeychainHelper.readClaudeOAuthToken() else {
             cuLog("EXIT: no credentials")
