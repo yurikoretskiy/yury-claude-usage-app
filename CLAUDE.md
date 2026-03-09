@@ -47,39 +47,18 @@ ClaudeUsage/
 Only non-null `seven_day_*` entries with a `utilization` field are shown. Unknown/null fields are silently skipped.
 
 ## Key Technical Decisions
-- **Credentials file first, Keychain fallback** — reading `~/.claude/.credentials.json` directly avoids macOS Keychain GUI permission popups. Keychain (`security` CLI) is only used if the file is missing/unreadable.
-- **Token caching (5 min)** — reduces credential reads from 1/min to 1/5min
 - **SPM over Xcode project** — simpler, no .xcodeproj files, builds with `swift build`
 - **NSImage rendering** — MenuBarExtra label only accepts Image+Text, so the entire widget (logo + bar + %) is rendered as a single NSImage
-- **LSUIElement = true** — no dock icon, menu bar only
 - **User-Agent header** — Anthropic's API requires `User-Agent: claude-code/X.X.X` or Cloudflare blocks with 429
-- **429 retry + backoff** — retries once with Retry-After header + jitter, then backs off (60s→120s max), resets to 60s on success. Shows cached data silently during backoff. Backoff callers use `startPolling(fetchImmediately: false)` to avoid recursive fetch loops.
-- **Network error retry** — retries once after 3s on transient errors (TLS, DNS, timeout) before backing off
 - **Dynamic model parsing** — automatically discovers new `seven_day_*` model limits without code changes
-- **File-based logging** — every fetch writes to `/tmp/ClaudeUsage.log` (auto-rotated at 500KB) so we can diagnose stuck states without terminal access
 
 ## Build & Run
 ```bash
 ./build-and-run.sh    # Build and launch (debug)
 open "/Applications/Claude Usage.app"  # Start installed version
 pkill -f ClaudeUsage  # Stop
-
-# To reinstall after code changes:
-pkill -f ClaudeUsage
-./build-and-run.sh
-pkill -f ClaudeUsage
-rm -rf "/Applications/Claude Usage.app"
-cp -R .build/debug/ClaudeUsage.app "/Applications/Claude Usage.app"
-open "/Applications/Claude Usage.app"
 ```
-
-## Debugging
-Logs always write to `/tmp/ClaudeUsage.log` regardless of how the app is launched:
-```bash
-cat /tmp/ClaudeUsage.log | tail -20     # Recent activity
-grep "EXIT\|429\|401" /tmp/ClaudeUsage.log  # Errors only
-```
-Log is cleared on reboot (`/tmp/`). Old log rotated to `/tmp/ClaudeUsage.log.old` at 500KB.
+For reinstall protocol (kill/rm/cp/open/md5-verify) and debugging via `/tmp/ClaudeUsage.log`, see the **app-development skill**.
 
 ## Dependencies
 - macOS 13+ (Ventura) — required for `MenuBarExtra`
@@ -87,24 +66,8 @@ Log is cleared on reboot (`/tmp/`). Old log rotated to `/tmp/ClaudeUsage.log.old
 - Claude Code must be logged in (`~/.claude/.credentials.json` must exist with valid OAuth token)
 - No third-party packages
 
-## Breakage History & Lessons (Feb–Mar 2026)
-
-| Date | Issue | Root Cause | Fix |
-|------|-------|-----------|-----|
-| Feb 24 | Keychain reading broke | macOS switched to hex-encoded credentials | Added hex decoding in KeychainHelper |
-| Mar 4 | OAuth 401 recurring | No token auto-refresh | Added token refresh flow |
-| Mar 6 | Cloudflare 429 | Anthropic added bot protection | Added `User-Agent: claude-code/X.X.X` header |
-| Mar 8 | Missing refreshToken crash | Keychain sync only stored accessToken | Store full creds (accessToken + refreshToken + expiresAt) |
-| Mar 8 | Only 2 of 3 limits shown | API added model-specific limits | Dynamic `seven_day_*` parsing |
-| Mar 9 | Widget stuck, "Last updated: 26 min ago" | `startPolling()` called `fetchUsage()` immediately during backoff, creating a recursive loop that kept triggering 429 | Added `fetchImmediately: false` param for backoff callers |
-| Mar 9 | Couldn't diagnose stuck states | No logs when launched via `open` / LaunchServices | Added file-based logging to `/tmp/ClaudeUsage.log` |
-| Mar 9 | Old binary kept running after rebuild | `cp -R` to `/Applications` silently fails while app is running | Must `pkill` first, then `rm -rf` old app, then copy |
-
-**Key lessons**:
-1. Read credentials from the file (`~/.claude/.credentials.json`) as the primary source, not the Keychain.
-2. Never call `fetchUsage()` immediately from a backoff/error path — let the timer control retry timing.
-3. Always have file-based logging — `NSLog` is invisible when the app runs via LaunchServices.
-4. After `swift build`, the binary is at `.build/arm64-apple-macosx/debug/ClaudeUsage`, but `build-and-run.sh` copies it to `.build/debug/ClaudeUsage.app/`. Always use `build-and-run.sh`, then copy the `.app` bundle to `/Applications`.
+## Breakage History
+8 breakages in Feb–Mar 2026. Full table and lessons in the **app-development skill** (`~/.claude/skills/app-development/reference.md`).
 
 ## Development Guidelines
 
