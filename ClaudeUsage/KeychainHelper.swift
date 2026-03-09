@@ -165,6 +165,87 @@ enum KeychainHelper {
         cacheTime = nil
     }
 
+    // MARK: - Token Refresh
+
+    private static let oauthTokenURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
+    private static let oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+
+    /// Refresh the OAuth access token using the refresh token.
+    /// Updates credentials file + Keychain, clears cache, returns new credentials.
+    static func refreshAccessToken() async -> OAuthCredentials? {
+        // Read current credentials to get refreshToken
+        guard let data = FileManager.default.contents(atPath: credentialsFilePath),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = json["claudeAiOauth"] as? [String: Any],
+              let refreshToken = oauth["refreshToken"] as? String,
+              !refreshToken.isEmpty else {
+            print("[ClaudeUsage] No refresh token available")
+            return nil
+        }
+
+        // POST to token endpoint
+        var request = URLRequest(url: oauthTokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("claude-code/2.1.63", forHTTPHeaderField: "User-Agent")
+
+        let body = "grant_type=refresh_token&refresh_token=\(refreshToken)&client_id=\(oauthClientID)"
+        request.httpBody = body.data(using: .utf8)
+
+        do {
+            let (responseData, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200,
+                  let result = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
+                  let newAccess = result["access_token"] as? String else {
+                print("[ClaudeUsage] Token refresh failed")
+                return nil
+            }
+
+            let newRefresh = result["refresh_token"] as? String ?? refreshToken
+            let expiresIn = result["expires_in"] as? Double ?? 3600
+            let expiresAtMs = Int((Date().timeIntervalSince1970 + expiresIn) * 1000)
+
+            // Update credentials file
+            var fullJson = json
+            var oauthDict = oauth
+            oauthDict["accessToken"] = newAccess
+            oauthDict["refreshToken"] = newRefresh
+            oauthDict["expiresAt"] = expiresAtMs
+            fullJson["claudeAiOauth"] = oauthDict
+
+            if let updatedData = try? JSONSerialization.data(withJSONObject: fullJson, options: [.sortedKeys]) {
+                try? updatedData.write(to: URL(fileURLWithPath: credentialsFilePath))
+            }
+
+            // Update Keychain
+            let keychainPayload = #"{"accessToken":"\#(newAccess)","refreshToken":"\#(newRefresh)","expiresAt":\#(expiresAtMs)}"#
+            let kcProcess = Process()
+            kcProcess.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+            kcProcess.arguments = ["add-generic-password", "-U",
+                                   "-s", "Claude Code-credentials",
+                                   "-a", "Claude Code-credentials",
+                                   "-w", keychainPayload]
+            kcProcess.standardOutput = Pipe()
+            kcProcess.standardError = Pipe()
+            try? kcProcess.run()
+            kcProcess.waitUntilExit()
+
+            // Clear cache so next read picks up new token
+            clearCache()
+
+            let expiresAt = Date(timeIntervalSince1970: Double(expiresAtMs) / 1000)
+            let creds = OAuthCredentials(accessToken: newAccess, refreshToken: newRefresh, expiresAt: expiresAt)
+            cachedCredentials = creds
+            cacheTime = Date()
+            return creds
+
+        } catch {
+            print("[ClaudeUsage] Token refresh error: \(error)")
+            return nil
+        }
+    }
+
     private static func extractCredentials(from json: [String: Any]) -> OAuthCredentials? {
         // Try nested format first (legacy): {"claudeAiOauth": {"accessToken": ...}}
         if let oauth = json["claudeAiOauth"] as? [String: Any],

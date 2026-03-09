@@ -51,11 +51,16 @@ class UsageService: ObservableObject {
             return
         }
 
-        // Check if token is expired
-        if let expiresAt = credentials.expiresAt, expiresAt < Date() {
+        // Auto-refresh if token is expired or expiring within 60s
+        var activeCredentials = credentials
+        if let expiresAt = credentials.expiresAt, expiresAt.timeIntervalSinceNow < 60 {
             KeychainHelper.clearCache()
-            usage.error = "OAuth token expired. Run 'claude' to refresh your session."
-            return
+            if let refreshed = await KeychainHelper.refreshAccessToken() {
+                activeCredentials = refreshed
+            } else {
+                usage.error = "Token expired. Run 'claude' to refresh your session."
+                return
+            }
         }
 
         isLoading = true
@@ -63,7 +68,7 @@ class UsageService: ObservableObject {
 
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(activeCredentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("claude-code/2.1.63", forHTTPHeaderField: "User-Agent")
 
@@ -76,7 +81,24 @@ class UsageService: ObservableObject {
             }
 
             if httpResponse.statusCode == 401 {
+                // Try refreshing the token and retrying once
                 KeychainHelper.clearCache()
+                if let refreshed = await KeychainHelper.refreshAccessToken() {
+                    var retryRequest = request
+                    retryRequest.setValue("Bearer \(refreshed.accessToken)", forHTTPHeaderField: "Authorization")
+                    if let (data2, resp2) = try? await URLSession.shared.data(for: retryRequest),
+                       let http2 = resp2 as? HTTPURLResponse, http2.statusCode == 200,
+                       let json2 = try? JSONSerialization.jsonObject(with: data2) as? [String: Any] {
+                        parseUsageResponse(json2)
+                        usage.lastFetched = Date()
+                        usage.error = nil
+                        if refreshInterval != defaultInterval {
+                            refreshInterval = defaultInterval
+                            startPolling()
+                        }
+                        return
+                    }
+                }
                 usage.error = "Token expired. Run 'claude' to refresh your session."
                 return
             }
