@@ -1,6 +1,30 @@
 import Foundation
 import Combine
 
+/// File logger — appends to /tmp/ClaudeUsage.log (max 500KB, auto-rotated).
+private func cuLog(_ msg: String) {
+    let ts = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withFullDate, .withFullTime, .withFractionalSeconds])
+    let line = "\(ts) [CU] \(msg)\n"
+    NSLog("[CU] %@", msg)
+    let path = "/tmp/ClaudeUsage.log"
+    // Rotate if > 500KB
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+       let size = attrs[.size] as? UInt64, size > 500_000 {
+        try? FileManager.default.removeItem(atPath: path + ".old")
+        try? FileManager.default.moveItem(atPath: path, toPath: path + ".old")
+    }
+    if let data = line.data(using: .utf8) {
+        if FileManager.default.fileExists(atPath: path),
+           let fh = FileHandle(forWritingAtPath: path) {
+            fh.seekToEndOfFile()
+            fh.write(data)
+            fh.closeFile()
+        } else {
+            FileManager.default.createFile(atPath: path, contents: data)
+        }
+    }
+}
+
 struct ModelLimit {
     let label: String
     let percent: Double
@@ -48,9 +72,9 @@ class UsageService: ObservableObject {
     }
 
     func fetchUsage() async {
-        NSLog("[CU] fetchUsage called, interval=%.0f", refreshInterval)
+        cuLog("fetchUsage called, interval=\(Int(refreshInterval))")
         guard let credentials = KeychainHelper.readClaudeOAuthToken() else {
-            NSLog("[CU] EXIT: no credentials")
+            cuLog("EXIT: no credentials")
             usage.error = "No OAuth token found. Make sure you're logged into Claude Code."
             return
         }
@@ -58,13 +82,13 @@ class UsageService: ObservableObject {
         // Auto-refresh if token is expired or expiring within 60s
         var activeCredentials = credentials
         if let expiresAt = credentials.expiresAt, expiresAt.timeIntervalSinceNow < 60 {
-            NSLog("[CU] Token expiring, refreshing...")
+            cuLog("Token expiring, refreshing...")
             KeychainHelper.clearCache()
             if let refreshed = await KeychainHelper.refreshAccessToken() {
                 activeCredentials = refreshed
-                NSLog("[CU] Token refreshed OK")
+                cuLog("Token refreshed OK")
             } else {
-                NSLog("[CU] EXIT: refresh failed")
+                cuLog("EXIT: refresh failed")
                 usage.error = "Token expired. Run 'claude' to refresh your session."
                 return
             }
@@ -83,12 +107,12 @@ class UsageService: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                NSLog("[CU] EXIT: invalid response object")
+                cuLog("EXIT: invalid response object")
                 usage.error = "Invalid response"
                 return
             }
 
-            NSLog("[CU] HTTP %d", httpResponse.statusCode)
+            cuLog("HTTP \(httpResponse.statusCode)")
 
             if httpResponse.statusCode == 401 {
                 KeychainHelper.clearCache()
@@ -101,7 +125,7 @@ class UsageService: ObservableObject {
                         parseUsageResponse(json2)
                         usage.lastFetched = Date()
                         usage.error = nil
-                        NSLog("[CU] 401→refresh→OK session=%.0f%% weekly=%.0f%%", usage.sessionPercent, usage.weeklyPercent)
+                        cuLog("401→refresh→OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
                         if refreshInterval != defaultInterval {
                             refreshInterval = defaultInterval
                             startPolling()
@@ -109,7 +133,7 @@ class UsageService: ObservableObject {
                         return
                     }
                 }
-                NSLog("[CU] EXIT: 401 unrecoverable")
+                cuLog("EXIT: 401 unrecoverable")
                 usage.error = "Token expired. Run 'claude' to refresh your session."
                 return
             }
@@ -117,7 +141,7 @@ class UsageService: ObservableObject {
             if httpResponse.statusCode == 429 {
                 let retryAfterHeader = Int(httpResponse.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 10
                 let retryDelay = max(retryAfterHeader, 10) + Int.random(in: 0...15)
-                NSLog("[CU] 429 — sleeping %ds before retry", retryDelay)
+                cuLog("429 — sleeping \(retryDelay)s before retry")
                 try? await Task.sleep(nanoseconds: UInt64(retryDelay) * 1_000_000_000)
                 do {
                     let (data2, response2) = try await URLSession.shared.data(for: request)
@@ -126,21 +150,21 @@ class UsageService: ObservableObject {
                         parseUsageResponse(json2)
                         usage.lastFetched = Date()
                         usage.error = nil
-                        NSLog("[CU] 429→retry→OK session=%.0f%% weekly=%.0f%%", usage.sessionPercent, usage.weeklyPercent)
+                        cuLog("429→retry→OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
                         if refreshInterval != defaultInterval {
                             refreshInterval = defaultInterval
                             startPolling()
                         }
                         return
                     } else if let http2 = response2 as? HTTPURLResponse {
-                        NSLog("[CU] 429→retry→HTTP %d", http2.statusCode)
+                        cuLog("429→retry→HTTP \(http2.statusCode)")
                     }
                 } catch {
-                    NSLog("[CU] 429→retry→error: %@", error.localizedDescription)
+                    cuLog("429→retry→error: \(error.localizedDescription)")
                 }
 
                 refreshInterval = min(refreshInterval * 2, maxInterval)
-                NSLog("[CU] EXIT: 429 backoff, next interval=%.0f", refreshInterval)
+                cuLog("EXIT: 429 backoff, next interval=\(Int(refreshInterval))")
                 startPolling(fetchImmediately: false)
                 if usage.lastFetched == nil {
                     usage.error = "Rate limited — retrying in \(Int(refreshInterval))s"
@@ -149,13 +173,13 @@ class UsageService: ObservableObject {
             }
 
             guard httpResponse.statusCode == 200 else {
-                NSLog("[CU] EXIT: unexpected HTTP %d", httpResponse.statusCode)
+                cuLog("EXIT: unexpected HTTP \(httpResponse.statusCode)")
                 usage.error = "API error: HTTP \(httpResponse.statusCode)"
                 return
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                NSLog("[CU] EXIT: JSON parse failed")
+                cuLog("EXIT: JSON parse failed")
                 usage.error = "Failed to parse response"
                 return
             }
@@ -163,7 +187,7 @@ class UsageService: ObservableObject {
             parseUsageResponse(json)
             usage.lastFetched = Date()
             usage.error = nil
-            NSLog("[CU] OK session=%.0f%% weekly=%.0f%%", usage.sessionPercent, usage.weeklyPercent)
+            cuLog("OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
 
             if refreshInterval != defaultInterval {
                 refreshInterval = defaultInterval
@@ -171,7 +195,7 @@ class UsageService: ObservableObject {
             }
 
         } catch {
-            NSLog("[CU] Network error: %@, retrying in 3s...", error.localizedDescription)
+            cuLog("Network error: \(error.localizedDescription), retrying in 3s...")
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             do {
                 let (data2, response2) = try await URLSession.shared.data(for: request)
@@ -180,21 +204,21 @@ class UsageService: ObservableObject {
                     parseUsageResponse(json2)
                     usage.lastFetched = Date()
                     usage.error = nil
-                    NSLog("[CU] network→retry→OK session=%.0f%% weekly=%.0f%%", usage.sessionPercent, usage.weeklyPercent)
+                    cuLog("network→retry→OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
                     if refreshInterval != defaultInterval {
                         refreshInterval = defaultInterval
                         startPolling()
                     }
                     return
                 } else if let http2 = response2 as? HTTPURLResponse {
-                    NSLog("[CU] network→retry→HTTP %d", http2.statusCode)
+                    cuLog("network→retry→HTTP \(http2.statusCode)")
                 }
             } catch {
-                NSLog("[CU] network→retry→error: %@", error.localizedDescription)
+                cuLog("network→retry→error: \(error.localizedDescription)")
             }
 
             refreshInterval = min(refreshInterval * 2, maxInterval)
-            NSLog("[CU] EXIT: network backoff, next interval=%.0f", refreshInterval)
+            cuLog("EXIT: network backoff, next interval=\(Int(refreshInterval))")
             startPolling(fetchImmediately: false)
             if usage.lastFetched == nil {
                 usage.error = "Network error: \(error.localizedDescription)"
