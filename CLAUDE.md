@@ -53,17 +53,33 @@ Only non-null `seven_day_*` entries with a `utilization` field are shown. Unknow
 - **NSImage rendering** — MenuBarExtra label only accepts Image+Text, so the entire widget (logo + bar + %) is rendered as a single NSImage
 - **LSUIElement = true** — no dock icon, menu bar only
 - **User-Agent header** — Anthropic's API requires `User-Agent: claude-code/X.X.X` or Cloudflare blocks with 429
-- **429 retry + backoff** — retries once with Retry-After header + jitter, then backs off (60s→120s max), resets to 60s on success. Shows cached data silently during backoff.
+- **429 retry + backoff** — retries once with Retry-After header + jitter, then backs off (60s→120s max), resets to 60s on success. Shows cached data silently during backoff. Backoff callers use `startPolling(fetchImmediately: false)` to avoid recursive fetch loops.
 - **Network error retry** — retries once after 3s on transient errors (TLS, DNS, timeout) before backing off
 - **Dynamic model parsing** — automatically discovers new `seven_day_*` model limits without code changes
+- **File-based logging** — every fetch writes to `/tmp/ClaudeUsage.log` (auto-rotated at 500KB) so we can diagnose stuck states without terminal access
 
 ## Build & Run
 ```bash
 ./build-and-run.sh    # Build and launch (debug)
-claude-usage          # Start (if installed in /Applications)
-claude-usage quit     # Stop
-claude-usage rebuild  # Rebuild from source and reinstall
+open "/Applications/Claude Usage.app"  # Start installed version
+pkill -f ClaudeUsage  # Stop
+
+# To reinstall after code changes:
+pkill -f ClaudeUsage
+./build-and-run.sh
+pkill -f ClaudeUsage
+rm -rf "/Applications/Claude Usage.app"
+cp -R .build/debug/ClaudeUsage.app "/Applications/Claude Usage.app"
+open "/Applications/Claude Usage.app"
 ```
+
+## Debugging
+Logs always write to `/tmp/ClaudeUsage.log` regardless of how the app is launched:
+```bash
+cat /tmp/ClaudeUsage.log | tail -20     # Recent activity
+grep "EXIT\|429\|401" /tmp/ClaudeUsage.log  # Errors only
+```
+Log is cleared on reboot (`/tmp/`). Old log rotated to `/tmp/ClaudeUsage.log.old` at 500KB.
 
 ## Dependencies
 - macOS 13+ (Ventura) — required for `MenuBarExtra`
@@ -80,5 +96,24 @@ claude-usage rebuild  # Rebuild from source and reinstall
 | Mar 6 | Cloudflare 429 | Anthropic added bot protection | Added `User-Agent: claude-code/X.X.X` header |
 | Mar 8 | Missing refreshToken crash | Keychain sync only stored accessToken | Store full creds (accessToken + refreshToken + expiresAt) |
 | Mar 8 | Only 2 of 3 limits shown | API added model-specific limits | Dynamic `seven_day_*` parsing |
+| Mar 9 | Widget stuck, "Last updated: 26 min ago" | `startPolling()` called `fetchUsage()` immediately during backoff, creating a recursive loop that kept triggering 429 | Added `fetchImmediately: false` param for backoff callers |
+| Mar 9 | Couldn't diagnose stuck states | No logs when launched via `open` / LaunchServices | Added file-based logging to `/tmp/ClaudeUsage.log` |
+| Mar 9 | Old binary kept running after rebuild | `cp -R` to `/Applications` silently fails while app is running | Must `pkill` first, then `rm -rf` old app, then copy |
 
-**Key lesson**: Read credentials from the file (`~/.claude/.credentials.json`) as the primary source, not the Keychain. The Keychain is a fallback only. Never iterate/probe Keychain entries — it triggers macOS permission popups.
+**Key lessons**:
+1. Read credentials from the file (`~/.claude/.credentials.json`) as the primary source, not the Keychain.
+2. Never call `fetchUsage()` immediately from a backoff/error path — let the timer control retry timing.
+3. Always have file-based logging — `NSLog` is invisible when the app runs via LaunchServices.
+4. After `swift build`, the binary is at `.build/arm64-apple-macosx/debug/ClaudeUsage`, but `build-and-run.sh` copies it to `.build/debug/ClaudeUsage.app/`. Always use `build-and-run.sh`, then copy the `.app` bundle to `/Applications`.
+
+## Systematic Issues & How to Avoid Them
+
+This project has had ~8 breakages in 2 weeks. The pattern:
+
+**Problem: Symptom-chasing without observability.** Each fix addressed the visible symptom (429, 401, stale data) without being able to see what the app was actually doing. We'd fix one thing, declare victory after 2-3 minutes of testing, then discover it broke again 15 minutes later.
+
+**What should be different next time:**
+1. **Logging first, features second.** Before writing retry logic, polling, or any error handling — add structured logging to a file. You can't fix what you can't see.
+2. **Test under failure conditions, not just success.** "It works for 3 minutes" proves nothing. Simulate 429s, token expiry, network drops. The happy path always works.
+3. **Verify the deployed binary, not the dev binary.** `swift build` and `open /Applications/...` can silently run different code. Always verify with `md5` after install.
+4. **One change per session.** Don't bundle "fix 429" + "add model parsing" + "change credential source" in one session. Each change introduces risk and makes debugging the next failure harder.
