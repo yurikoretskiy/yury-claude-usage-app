@@ -106,14 +106,12 @@ Log is cleared on reboot (`/tmp/`). Old log rotated to `/tmp/ClaudeUsage.log.old
 3. Always have file-based logging — `NSLog` is invisible when the app runs via LaunchServices.
 4. After `swift build`, the binary is at `.build/arm64-apple-macosx/debug/ClaudeUsage`, but `build-and-run.sh` copies it to `.build/debug/ClaudeUsage.app/`. Always use `build-and-run.sh`, then copy the `.app` bundle to `/Applications`.
 
-## Systematic Issues & How to Avoid Them
+## Development Guidelines
 
-This project has had ~8 breakages in 2 weeks. The pattern:
+This project follows the **app-development skill** — see `claude-improvements/skills-staging/app-development/SKILL.md` for the full guide.
 
-**Problem: Symptom-chasing without observability.** Each fix addressed the visible symptom (429, 401, stale data) without being able to see what the app was actually doing. We'd fix one thing, declare victory after 2-3 minutes of testing, then discover it broke again 15 minutes later.
-
-**What should be different next time:**
-1. **Logging first, features second.** Before writing retry logic, polling, or any error handling — add structured logging to a file. You can't fix what you can't see.
-2. **Test under failure conditions, not just success.** "It works for 3 minutes" proves nothing. Simulate 429s, token expiry, network drops. The happy path always works.
-3. **Verify the deployed binary, not the dev binary.** `swift build` and `open /Applications/...` can silently run different code. Always verify with `md5` after install.
-4. **One change per session.** Don't bundle "fix 429" + "add model parsing" + "change credential source" in one session. Each change introduces risk and makes debugging the next failure harder.
+**Key rules for this project:**
+1. **Check logs first** (`/tmp/ClaudeUsage.log`) before changing any code
+2. **Never call `fetchUsage()` immediately from backoff/error paths** — use `startPolling(fetchImmediately: false)`
+3. **Deploy protocol:** `pkill` → `rm -rf` → `cp -R` → `open` → verify with `md5`
+4. **One change per session** — don't bundle fixes
