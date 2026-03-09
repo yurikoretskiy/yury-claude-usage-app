@@ -48,7 +48,9 @@ class UsageService: ObservableObject {
     }
 
     func fetchUsage() async {
+        NSLog("[CU] fetchUsage called, interval=%.0f", refreshInterval)
         guard let credentials = KeychainHelper.readClaudeOAuthToken() else {
+            NSLog("[CU] EXIT: no credentials")
             usage.error = "No OAuth token found. Make sure you're logged into Claude Code."
             return
         }
@@ -56,10 +58,13 @@ class UsageService: ObservableObject {
         // Auto-refresh if token is expired or expiring within 60s
         var activeCredentials = credentials
         if let expiresAt = credentials.expiresAt, expiresAt.timeIntervalSinceNow < 60 {
+            NSLog("[CU] Token expiring, refreshing...")
             KeychainHelper.clearCache()
             if let refreshed = await KeychainHelper.refreshAccessToken() {
                 activeCredentials = refreshed
+                NSLog("[CU] Token refreshed OK")
             } else {
+                NSLog("[CU] EXIT: refresh failed")
                 usage.error = "Token expired. Run 'claude' to refresh your session."
                 return
             }
@@ -78,12 +83,14 @@ class UsageService: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
+                NSLog("[CU] EXIT: invalid response object")
                 usage.error = "Invalid response"
                 return
             }
 
+            NSLog("[CU] HTTP %d", httpResponse.statusCode)
+
             if httpResponse.statusCode == 401 {
-                // Try refreshing the token and retrying once
                 KeychainHelper.clearCache()
                 if let refreshed = await KeychainHelper.refreshAccessToken() {
                     var retryRequest = request
@@ -94,6 +101,7 @@ class UsageService: ObservableObject {
                         parseUsageResponse(json2)
                         usage.lastFetched = Date()
                         usage.error = nil
+                        NSLog("[CU] 401→refresh→OK session=%.0f%% weekly=%.0f%%", usage.sessionPercent, usage.weeklyPercent)
                         if refreshInterval != defaultInterval {
                             refreshInterval = defaultInterval
                             startPolling()
@@ -101,14 +109,15 @@ class UsageService: ObservableObject {
                         return
                     }
                 }
+                NSLog("[CU] EXIT: 401 unrecoverable")
                 usage.error = "Token expired. Run 'claude' to refresh your session."
                 return
             }
 
             if httpResponse.statusCode == 429 {
-                // Retry once after delay (min 10s + jitter to avoid sync issues)
                 let retryAfterHeader = Int(httpResponse.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 10
                 let retryDelay = max(retryAfterHeader, 10) + Int.random(in: 0...15)
+                NSLog("[CU] 429 — sleeping %ds before retry", retryDelay)
                 try? await Task.sleep(nanoseconds: UInt64(retryDelay) * 1_000_000_000)
                 do {
                     let (data2, response2) = try await URLSession.shared.data(for: request)
@@ -117,30 +126,36 @@ class UsageService: ObservableObject {
                         parseUsageResponse(json2)
                         usage.lastFetched = Date()
                         usage.error = nil
+                        NSLog("[CU] 429→retry→OK session=%.0f%% weekly=%.0f%%", usage.sessionPercent, usage.weeklyPercent)
                         if refreshInterval != defaultInterval {
                             refreshInterval = defaultInterval
                             startPolling()
                         }
                         return
+                    } else if let http2 = response2 as? HTTPURLResponse {
+                        NSLog("[CU] 429→retry→HTTP %d", http2.statusCode)
                     }
-                } catch { }
+                } catch {
+                    NSLog("[CU] 429→retry→error: %@", error.localizedDescription)
+                }
 
-                // Retry also failed — back off silently if we have cached data
                 refreshInterval = min(refreshInterval * 2, maxInterval)
+                NSLog("[CU] EXIT: 429 backoff, next interval=%.0f", refreshInterval)
                 startPolling(fetchImmediately: false)
                 if usage.lastFetched == nil {
                     usage.error = "Rate limited — retrying in \(Int(refreshInterval))s"
                 }
-                // If we have cached data, don't show error — "Last updated" tells the story
                 return
             }
 
             guard httpResponse.statusCode == 200 else {
+                NSLog("[CU] EXIT: unexpected HTTP %d", httpResponse.statusCode)
                 usage.error = "API error: HTTP \(httpResponse.statusCode)"
                 return
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                NSLog("[CU] EXIT: JSON parse failed")
                 usage.error = "Failed to parse response"
                 return
             }
@@ -148,15 +163,15 @@ class UsageService: ObservableObject {
             parseUsageResponse(json)
             usage.lastFetched = Date()
             usage.error = nil
+            NSLog("[CU] OK session=%.0f%% weekly=%.0f%%", usage.sessionPercent, usage.weeklyPercent)
 
-            // Reset polling interval on success
             if refreshInterval != defaultInterval {
                 refreshInterval = defaultInterval
                 startPolling()
             }
 
         } catch {
-            // Transient network error (TLS, timeout, etc.) — retry once after 3s
+            NSLog("[CU] Network error: %@, retrying in 3s...", error.localizedDescription)
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             do {
                 let (data2, response2) = try await URLSession.shared.data(for: request)
@@ -165,18 +180,21 @@ class UsageService: ObservableObject {
                     parseUsageResponse(json2)
                     usage.lastFetched = Date()
                     usage.error = nil
+                    NSLog("[CU] network→retry→OK session=%.0f%% weekly=%.0f%%", usage.sessionPercent, usage.weeklyPercent)
                     if refreshInterval != defaultInterval {
                         refreshInterval = defaultInterval
                         startPolling()
                     }
                     return
+                } else if let http2 = response2 as? HTTPURLResponse {
+                    NSLog("[CU] network→retry→HTTP %d", http2.statusCode)
                 }
             } catch {
-                // Retry also failed — fall through
+                NSLog("[CU] network→retry→error: %@", error.localizedDescription)
             }
 
-            // Both attempts failed — backoff, show error only if no cached data
             refreshInterval = min(refreshInterval * 2, maxInterval)
+            NSLog("[CU] EXIT: network backoff, next interval=%.0f", refreshInterval)
             startPolling(fetchImmediately: false)
             if usage.lastFetched == nil {
                 usage.error = "Network error: \(error.localizedDescription)"
