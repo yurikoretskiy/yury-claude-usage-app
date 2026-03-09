@@ -108,7 +108,7 @@ Log is cleared on reboot (`/tmp/`). Old log rotated to `/tmp/ClaudeUsage.log.old
 
 ## Development Guidelines
 
-This project follows the **app-development skill** — see `claude-improvements/skills-staging/app-development/SKILL.md` for the full guide.
+This project follows the **app-development skill** (installed at `~/.claude/skills/app-development/`). Claude loads it automatically when working on this app.
 
 **Key rules for this project:**
 1. **Check logs first** (`/tmp/ClaudeUsage.log`) before changing any code
