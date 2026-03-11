@@ -63,11 +63,20 @@ enum KeychainHelper {
         return extractCredentials(from: json)
     }
 
-    /// Read credentials from macOS Keychain (legacy fallback)
+    /// Read credentials from macOS Keychain
     private static func readFromKeychain() -> OAuthCredentials? {
+        // Try new format first (CLI v2.1.72+): account = username
+        if let creds = readKeychainEntry(account: NSUserName()) {
+            return creds
+        }
+        // Fallback: old format (account = "Claude Code-credentials")
+        return readKeychainEntry(account: "Claude Code-credentials")
+    }
+
+    private static func readKeychainEntry(account: String) -> OAuthCredentials? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-g"]
+        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-a", account, "-g"]
 
         let outPipe = Pipe()
         let errPipe = Pipe()
@@ -78,24 +87,20 @@ enum KeychainHelper {
             try process.run()
             process.waitUntilExit()
         } catch {
-            print("Failed to run security command: \(error)")
             return nil
         }
 
         guard process.terminationStatus == 0 else {
-            print("security command failed with status \(process.terminationStatus)")
             return nil
         }
 
         let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: errData, encoding: .utf8), !output.isEmpty else {
-            print("Empty keychain data")
             return nil
         }
 
         let decoded = decodeKeychainOutput(output)
         guard let decoded = decoded, !decoded.isEmpty else {
-            print("Could not decode keychain password")
             return nil
         }
 
