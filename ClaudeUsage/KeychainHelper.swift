@@ -63,53 +63,45 @@ enum KeychainHelper {
         return extractCredentials(from: json)
     }
 
-    /// Read credentials from macOS Keychain
+    /// Read credentials from macOS Keychain — searches ALL entries with service
+    /// "Claude Code-credentials" and picks the one with the freshest non-expired token.
+    /// This is future-proof: if the CLI changes the account name again, we still find it.
     private static func readFromKeychain() -> OAuthCredentials? {
-        // Try new format first (CLI v2.1.72+): account = username
-        if let creds = readKeychainEntry(account: NSUserName()) {
-            return creds
-        }
-        // Fallback: old format (account = "Claude Code-credentials")
-        return readKeychainEntry(account: "Claude Code-credentials")
-    }
+        // Use Security framework to find ALL matching entries
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials",
+            kSecReturnData as String: true,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
 
-    private static func readKeychainEntry(account: String) -> OAuthCredentials? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-a", account, "-g"]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
+        guard status == errSecSuccess,
+              let items = result as? [[String: Any]] else {
             return nil
         }
 
-        guard process.terminationStatus == 0 else {
-            return nil
+        // Try each entry, pick the one with the latest non-expired token
+        var bestCreds: OAuthCredentials? = nil
+        var bestExpiry: Date = .distantPast
+
+        for item in items {
+            guard let data = item[kSecValueData as String] as? Data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let creds = extractCredentials(from: json) else {
+                continue
+            }
+            let expiry = creds.expiresAt ?? .distantFuture
+            if expiry > bestExpiry {
+                bestCreds = creds
+                bestExpiry = expiry
+            }
         }
 
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: errData, encoding: .utf8), !output.isEmpty else {
-            return nil
-        }
-
-        let decoded = decodeKeychainOutput(output)
-        guard let decoded = decoded, !decoded.isEmpty else {
-            return nil
-        }
-
-        if let jsonData = decoded.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-            return extractCredentials(from: json)
-        }
-
-        return extractCredentialsViaRegex(from: decoded)
+        return bestCreds
     }
 
     /// Decode the password line from `security -g` output.
