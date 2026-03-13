@@ -27,9 +27,6 @@ enum KeychainHelper {
     private static var cachedCredentials: OAuthCredentials?
     private static var cacheTime: Date?
 
-    /// Path to Claude Code's credentials file — the canonical token source.
-    private static let credentialsFilePath = NSString("~/.claude/.credentials.json").expandingTildeInPath
-
     static func readClaudeOAuthToken() -> OAuthCredentials? {
         // Return cached token if less than 5 minutes old
         if let cached = cachedCredentials, let cacheTime = cacheTime,
@@ -37,14 +34,8 @@ enum KeychainHelper {
             return cached
         }
 
-        // PRIMARY: read from ~/.claude/.credentials.json (same source Claude Code uses)
-        if let creds = readFromCredentialsFile() {
-            cachedCredentials = creds
-            cacheTime = Date()
-            return creds
-        }
-
-        // FALLBACK: read from macOS Keychain
+        // Read freshest token from macOS Keychain.
+        // Claude Code (extension/CLI) manages token refresh — we just read.
         if let creds = readFromKeychain() {
             cachedCredentials = creds
             cacheTime = Date()
@@ -54,54 +45,71 @@ enum KeychainHelper {
         return nil
     }
 
-    /// Read credentials from ~/.claude/.credentials.json
-    private static func readFromCredentialsFile() -> OAuthCredentials? {
-        guard let data = FileManager.default.contents(atPath: credentialsFilePath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        return extractCredentials(from: json)
-    }
-
-    /// Read credentials from macOS Keychain — searches ALL entries with service
-    /// "Claude Code-credentials" and picks the one with the freshest non-expired token.
-    /// This is future-proof: if the CLI changes the account name again, we still find it.
+    /// Read credentials from macOS Keychain via `security` CLI.
+    /// Uses `security find-generic-password -w` to directly read the password.
+    /// Tries known account names and picks the freshest token.
     private static func readFromKeychain() -> OAuthCredentials? {
-        // Use Security framework to find ALL matching entries
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "Claude Code-credentials",
-            kSecReturnData as String: true,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll
-        ]
+        // Try the direct -w flag approach for known account names.
+        // Also try with just the service name (no account) as a catch-all.
+        let accountsToTry = ["yurikoretskiy", "Claude Code-credentials"]
 
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-              let items = result as? [[String: Any]] else {
-            return nil
-        }
-
-        // Try each entry, pick the one with the latest non-expired token
         var bestCreds: OAuthCredentials? = nil
         var bestExpiry: Date = .distantPast
 
-        for item in items {
-            guard let data = item[kSecValueData as String] as? Data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let creds = extractCredentials(from: json) else {
-                continue
-            }
-            let expiry = creds.expiresAt ?? .distantFuture
-            if expiry > bestExpiry {
-                bestCreds = creds
-                bestExpiry = expiry
+        for account in accountsToTry {
+            if let creds = readKeychainEntryDirect(account: account) {
+                let expiry = creds.expiresAt ?? .distantFuture
+                if expiry > bestExpiry {
+                    bestCreds = creds
+                    bestExpiry = expiry
+                }
             }
         }
 
+        // Fallback: try without specifying account (gets first match)
+        if bestCreds == nil {
+            bestCreds = readKeychainEntryDirect(account: nil)
+        }
+
         return bestCreds
+    }
+
+    /// Read a Keychain entry using `security find-generic-password -w` (returns password directly).
+    private static func readKeychainEntryDirect(account: String?) -> OAuthCredentials? {
+        var args = ["find-generic-password", "-s", "Claude Code-credentials"]
+        if let account = account {
+            args += ["-a", account]
+        }
+        args.append("-w")
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = args
+        let outPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else { return nil }
+
+        let raw = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !raw.isEmpty else { return nil }
+
+        // Try JSON parse
+        if let data = raw.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return extractCredentials(from: json)
+        }
+
+        // Fallback: regex extraction for truncated JSON
+        return extractCredentialsViaRegex(from: raw)
     }
 
     /// Decode the password line from `security -g` output.
@@ -160,87 +168,6 @@ enum KeychainHelper {
     static func clearCache() {
         cachedCredentials = nil
         cacheTime = nil
-    }
-
-    // MARK: - Token Refresh
-
-    private static let oauthTokenURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
-    private static let oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-
-    /// Refresh the OAuth access token using the refresh token.
-    /// Updates credentials file + Keychain, clears cache, returns new credentials.
-    static func refreshAccessToken() async -> OAuthCredentials? {
-        // Read current credentials to get refreshToken
-        guard let data = FileManager.default.contents(atPath: credentialsFilePath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let oauth = json["claudeAiOauth"] as? [String: Any],
-              let refreshToken = oauth["refreshToken"] as? String,
-              !refreshToken.isEmpty else {
-            print("[ClaudeUsage] No refresh token available")
-            return nil
-        }
-
-        // POST to token endpoint
-        var request = URLRequest(url: oauthTokenURL)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue("claude-code/2.1.63", forHTTPHeaderField: "User-Agent")
-
-        let body = "grant_type=refresh_token&refresh_token=\(refreshToken)&client_id=\(oauthClientID)"
-        request.httpBody = body.data(using: .utf8)
-
-        do {
-            let (responseData, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  let result = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
-                  let newAccess = result["access_token"] as? String else {
-                print("[ClaudeUsage] Token refresh failed")
-                return nil
-            }
-
-            let newRefresh = result["refresh_token"] as? String ?? refreshToken
-            let expiresIn = result["expires_in"] as? Double ?? 3600
-            let expiresAtMs = Int((Date().timeIntervalSince1970 + expiresIn) * 1000)
-
-            // Update credentials file
-            var fullJson = json
-            var oauthDict = oauth
-            oauthDict["accessToken"] = newAccess
-            oauthDict["refreshToken"] = newRefresh
-            oauthDict["expiresAt"] = expiresAtMs
-            fullJson["claudeAiOauth"] = oauthDict
-
-            if let updatedData = try? JSONSerialization.data(withJSONObject: fullJson, options: [.sortedKeys]) {
-                try? updatedData.write(to: URL(fileURLWithPath: credentialsFilePath))
-            }
-
-            // Update Keychain
-            let keychainPayload = #"{"accessToken":"\#(newAccess)","refreshToken":"\#(newRefresh)","expiresAt":\#(expiresAtMs)}"#
-            let kcProcess = Process()
-            kcProcess.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-            kcProcess.arguments = ["add-generic-password", "-U",
-                                   "-s", "Claude Code-credentials",
-                                   "-a", "Claude Code-credentials",
-                                   "-w", keychainPayload]
-            kcProcess.standardOutput = Pipe()
-            kcProcess.standardError = Pipe()
-            try? kcProcess.run()
-            kcProcess.waitUntilExit()
-
-            // Clear cache so next read picks up new token
-            clearCache()
-
-            let expiresAt = Date(timeIntervalSince1970: Double(expiresAtMs) / 1000)
-            let creds = OAuthCredentials(accessToken: newAccess, refreshToken: newRefresh, expiresAt: expiresAt)
-            cachedCredentials = creds
-            cacheTime = Date()
-            return creds
-
-        } catch {
-            print("[ClaudeUsage] Token refresh error: \(error)")
-            return nil
-        }
     }
 
     private static func extractCredentials(from json: [String: Any]) -> OAuthCredentials? {

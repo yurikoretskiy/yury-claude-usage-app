@@ -83,17 +83,18 @@ class UsageService: ObservableObject {
             return
         }
 
-        // Auto-refresh if token is expired or expiring within 60s
+        // If token is expiring, clear cache to re-read from Keychain
+        // (Claude Code extension keeps the token fresh in Keychain)
         var activeCredentials = credentials
         if let expiresAt = credentials.expiresAt, expiresAt.timeIntervalSinceNow < 60 {
-            cuLog("Token expiring, refreshing...")
+            cuLog("Token expiring, re-reading from Keychain...")
             KeychainHelper.clearCache()
-            if let refreshed = await KeychainHelper.refreshAccessToken() {
-                activeCredentials = refreshed
-                cuLog("Token refreshed OK")
+            if let fresh = KeychainHelper.readClaudeOAuthToken() {
+                activeCredentials = fresh
+                cuLog("Got fresh token from Keychain")
             } else {
-                cuLog("EXIT: refresh failed")
-                usage.error = "Token expired. Run 'claude' to refresh your session."
+                cuLog("EXIT: no fresh token in Keychain")
+                usage.error = "Token expired. Open Claude Code or run 'claude' to refresh."
                 return
             }
         }
@@ -119,17 +120,18 @@ class UsageService: ObservableObject {
             cuLog("HTTP \(httpResponse.statusCode)")
 
             if httpResponse.statusCode == 401 {
+                // Re-read from Keychain in case Claude Code refreshed the token
                 KeychainHelper.clearCache()
-                if let refreshed = await KeychainHelper.refreshAccessToken() {
+                if let fresh = KeychainHelper.readClaudeOAuthToken() {
                     var retryRequest = request
-                    retryRequest.setValue("Bearer \(refreshed.accessToken)", forHTTPHeaderField: "Authorization")
+                    retryRequest.setValue("Bearer \(fresh.accessToken)", forHTTPHeaderField: "Authorization")
                     if let (data2, resp2) = try? await URLSession.shared.data(for: retryRequest),
                        let http2 = resp2 as? HTTPURLResponse, http2.statusCode == 200,
                        let json2 = try? JSONSerialization.jsonObject(with: data2) as? [String: Any] {
                         parseUsageResponse(json2)
                         usage.lastFetched = Date()
                         usage.error = nil
-                        cuLog("401→refresh→OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
+                        cuLog("401→re-read→OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
                         if refreshInterval != defaultInterval {
                             refreshInterval = defaultInterval
                             startPolling()
@@ -138,7 +140,7 @@ class UsageService: ObservableObject {
                     }
                 }
                 cuLog("EXIT: 401 unrecoverable")
-                usage.error = "Token expired. Run 'claude' to refresh your session."
+                usage.error = "Token expired. Open Claude Code or run 'claude' to refresh."
                 return
             }
 
