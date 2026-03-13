@@ -49,7 +49,7 @@ class UsageService: ObservableObject {
     private var timer: Timer?
     private var refreshInterval: TimeInterval = 60
     private let defaultInterval: TimeInterval = 60
-    private let maxInterval: TimeInterval = 120
+    private let maxInterval: TimeInterval = 300
 
     init() {
         startPolling()
@@ -106,7 +106,7 @@ class UsageService: ObservableObject {
         request.httpMethod = "GET"
         request.setValue("Bearer \(activeCredentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.setValue("claude-code/2.1.63", forHTTPHeaderField: "User-Agent")
+        request.setValue("claude-code/2.1.74", forHTTPHeaderField: "User-Agent")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -145,35 +145,17 @@ class UsageService: ObservableObject {
             }
 
             if httpResponse.statusCode == 429 {
+                // Non-blocking 429 handling: schedule retry via timer, never sleep inline.
+                // Cap Retry-After to maxInterval (300s) — API can return 3000+s.
+                // Use exponential backoff: double current interval, floor at Retry-After.
                 let retryAfterHeader = Int(httpResponse.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 10
-                let retryDelay = max(retryAfterHeader, 10) + Int.random(in: 0...15)
-                cuLog("429 — sleeping \(retryDelay)s before retry")
-                try? await Task.sleep(nanoseconds: UInt64(retryDelay) * 1_000_000_000)
-                do {
-                    let (data2, response2) = try await URLSession.shared.data(for: request)
-                    if let http2 = response2 as? HTTPURLResponse, http2.statusCode == 200,
-                       let json2 = try JSONSerialization.jsonObject(with: data2) as? [String: Any] {
-                        parseUsageResponse(json2)
-                        usage.lastFetched = Date()
-                        usage.error = nil
-                        cuLog("429→retry→OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
-                        if refreshInterval != defaultInterval {
-                            refreshInterval = defaultInterval
-                            startPolling()
-                        }
-                        return
-                    } else if let http2 = response2 as? HTTPURLResponse {
-                        cuLog("429→retry→HTTP \(http2.statusCode)")
-                    }
-                } catch {
-                    cuLog("429→retry→error: \(error.localizedDescription)")
-                }
-
-                refreshInterval = min(refreshInterval * 2, maxInterval)
-                cuLog("EXIT: 429 backoff, next interval=\(Int(refreshInterval))")
+                let backoff = min(refreshInterval * 2, maxInterval)
+                let retryDelay = min(max(backoff, TimeInterval(retryAfterHeader)), maxInterval)
+                refreshInterval = retryDelay
+                cuLog("EXIT: 429 (Retry-After: \(retryAfterHeader)s), next poll in \(Int(retryDelay))s via timer")
                 startPolling(fetchImmediately: false)
                 if usage.lastFetched == nil {
-                    usage.error = "Rate limited — retrying in \(Int(refreshInterval))s"
+                    usage.error = "Rate limited — retrying in \(Int(retryDelay))s"
                 }
                 return
             }
