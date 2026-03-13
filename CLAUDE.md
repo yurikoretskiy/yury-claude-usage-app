@@ -12,8 +12,9 @@ ClaudeUsage/
 │                               Parses five_hour, seven_day, and dynamic model-specific
 │                               limits (seven_day_sonnet, seven_day_opus, etc.).
 │                               Published @ObservableObject driving the UI.
-├── KeychainHelper.swift      — Reads OAuth token. Primary: ~/.claude/.credentials.json.
-│                               Fallback: macOS Keychain via `security` CLI.
+├── KeychainHelper.swift      — Reads OAuth token from macOS Keychain via `security` CLI.
+│                               Read-only: Claude Code handles token refresh.
+│                               Tries known account names, picks freshest token.
 │                               Caches token for 5 min to avoid repeated reads.
 ├── MenuBarRenderer.swift     — Renders the retro-digital NSImage for the menu bar:
 │                               Claude logo PNG + orange segmented bar + percentage.
@@ -24,8 +25,8 @@ ClaudeUsage/
 ```
 
 ## Data Flow
-1. `KeychainHelper` reads OAuth token from `~/.claude/.credentials.json` (primary) or `Claude Code-credentials` keychain entry (fallback)
-   - Supports two JSON formats: nested `{"claudeAiOauth": {"accessToken": ...}}` (legacy) and flat `{"accessToken": ...}` (current)
+1. `KeychainHelper` reads OAuth token from macOS Keychain via `security find-generic-password -w`. Tries known account names (e.g. username, "Claude Code-credentials"), picks the freshest by `expiresAt`. Claude Code (extension/CLI) handles token refresh — the widget is read-only.
+   - Supports two JSON formats: nested `{"claudeAiOauth": {"accessToken": ...}}` and flat `{"accessToken": ...}`
 2. `UsageService` calls `GET https://api.anthropic.com/api/oauth/usage` with Bearer token, `anthropic-beta: oauth-2025-04-20`, and `User-Agent: claude-code/X.X.X` header (required by Cloudflare)
 3. API returns active fields (`five_hour`, `seven_day`, `seven_day_sonnet`, etc.) plus null/inactive fields — parser dynamically discovers any `seven_day_*` model-specific limits
 4. `MenuBarRenderer` generates an NSImage from the session percentage
@@ -63,7 +64,7 @@ For reinstall protocol (kill/rm/cp/open/md5-verify) and debugging via `/tmp/Clau
 ## Dependencies
 - macOS 13+ (Ventura) — required for `MenuBarExtra`
 - Swift 5.9+
-- Claude Code must be logged in (`~/.claude/.credentials.json` must exist with valid OAuth token)
+- Claude Code must be logged in (token must exist in macOS Keychain under service "Claude Code-credentials")
 - No third-party packages
 
 ## Breakage History
