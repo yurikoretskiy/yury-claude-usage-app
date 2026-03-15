@@ -48,6 +48,26 @@ class UsageService: ObservableObject {
 
     private var timer: Timer?
     private var refreshInterval: TimeInterval = 60
+
+    /// Read `claude --version` once at startup so User-Agent never goes stale.
+    static let claudeVersion: String = {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/local/bin/claude")
+        proc.arguments = ["--version"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(separator: " ").first.map(String.init) ?? "2.1.76"
+            return out
+        } catch {
+            return "2.1.76"
+        }
+    }()
     private let defaultInterval: TimeInterval = 60
     private let maxInterval: TimeInterval = 300
 
@@ -106,7 +126,7 @@ class UsageService: ObservableObject {
         request.httpMethod = "GET"
         request.setValue("Bearer \(activeCredentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.setValue("claude-code/2.1.74", forHTTPHeaderField: "User-Agent")
+        request.setValue("claude-code/\(Self.claudeVersion)", forHTTPHeaderField: "User-Agent")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)

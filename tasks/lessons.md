@@ -31,7 +31,7 @@ When the user reports "CU is broken" or the widget shows any error:
 |------|-----|----------|
 | Never use `Task.sleep` inside a guarded async function (`isLoading`) | Sleep holds the guard for the entire duration, blocking all future calls. Use timer-based retry instead. | 13-03-2026: 3486s sleep froze widget |
 | Cap `Retry-After` to `maxInterval` (300s) | API can return 3000+s. Respecting it literally kills the widget. | 13-03-2026: Retry-After: 3471 |
-| Check `claude --version` and update User-Agent when fixing the widget | Stale User-Agent triggers Cloudflare rate limits. It rots silently. | 13-03-2026: was 2.1.63, current 2.1.74 |
+| User-Agent MUST be dynamic — read `claude --version` at runtime | Stale User-Agent triggers Cloudflare 3000+s rate limits. Hardcoding rots silently on every Claude Code update. | 15-03-2026: UA 2.1.74 caused 57-min block. Now reads dynamically. |
 | Error messages must match actual state | Widget showed "No OAuth token found" when real issue was 429 rate limit. User can't diagnose from wrong message. | 13-03-2026 |
 | Never do inline retry inside `fetchUsage()` | Use `startPolling(fetchImmediately: false)` to schedule retries via timer. This is already documented in CLAUDE.md rule #2. | Multiple incidents |
 | Always check BOTH credentials file AND Keychain for tokens | Claude Code flip-flops storage location across versions. Removing one source guarantees future breakage. Pick freshest `expiresAt`. | 15-03-2026: v2.1.76 switched back to credentials file |
@@ -39,7 +39,7 @@ When the user reports "CU is broken" or the widget shows any error:
 ### Maintenance Checklist (run every fix session)
 
 - [ ] Read `/tmp/ClaudeUsage.log` first
-- [ ] Check `claude --version` vs hardcoded User-Agent in UsageService.swift:109
+- [ ] Verify User-Agent is dynamic (grep `claudeVersion` in UsageService.swift) — no hardcoded version
 - [ ] After fix: verify via logs (`OK session=X% weekly=Y%`), not just "it compiled"
 - [ ] Deploy protocol: `pkill` → `rm -rf` → `cp -R` → `open` → verify md5
 
@@ -92,4 +92,5 @@ cd ~/yury-vibe-coding/claude-usage-app && ./build-and-run.sh
 | 13-03-2026 | `cu` CLI: "HTTP 400 Bad Request" | Keychain account name changed to `yurikoretskiy`, script tried stale entry | Removed self-managed OAuth refresh, read freshest keychain entry |
 | 12-03-2026 | "No Claude Code credentials found" | Keychain parser assumed field ordering | Rewrote parser to collect fields independently |
 | 15-03-2026 | 401 errors, widget and `cu` broken | Claude Code v2.1.76 switched back to `~/.claude/.credentials.json`, stopped updating Keychain | Added dual-source: check both credentials file AND Keychain, pick freshest `expiresAt`. Both sources permanent. |
+| 15-03-2026 | Widget and `cu` 429'd for 57 min | Stale User-Agent (`2.1.74` / `2.1.63`) triggered Cloudflare rate limit (`retry-after: 3459`). Also: `cu` script crashed on 429 instead of exiting gracefully. | Made User-Agent dynamic in both widget (`Self.claudeVersion` reads `claude --version`) and script (`get_claude_version()`). Fixed `cu` 429 handling: exponential backoff when `Retry-After=0`, graceful exit after retries exhausted. |
 | Earlier | Script couldn't find credentials | `~/.claude/.credentials.json` removed | Added Keychain fallback (now primary) |
