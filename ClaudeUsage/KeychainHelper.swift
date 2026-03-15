@@ -34,15 +34,50 @@ enum KeychainHelper {
             return cached
         }
 
-        // Read freshest token from macOS Keychain.
-        // Claude Code (extension/CLI) manages token refresh — we just read.
-        if let creds = readFromKeychain() {
+        // Read from both sources, pick the freshest.
+        // Claude Code flip-flops between credentials file and Keychain
+        // across versions — we check both permanently.
+        var bestCreds: OAuthCredentials? = nil
+        var bestExpiry: Date = .distantPast
+        var bestSource = ""
+
+        if let fileCreds = readFromCredentialsFile() {
+            let expiry = fileCreds.expiresAt ?? .distantFuture
+            if expiry > bestExpiry {
+                bestCreds = fileCreds
+                bestExpiry = expiry
+                bestSource = "credentials file"
+            }
+        }
+
+        if let keychainCreds = readFromKeychain() {
+            let expiry = keychainCreds.expiresAt ?? .distantFuture
+            if expiry > bestExpiry {
+                bestCreds = keychainCreds
+                bestExpiry = expiry
+                bestSource = "Keychain"
+            }
+        }
+
+        if let creds = bestCreds {
+            print("[CU] Token source: \(bestSource)")
             cachedCredentials = creds
             cacheTime = Date()
             return creds
         }
 
         return nil
+    }
+
+    /// Read credentials from ~/.claude/.credentials.json (Claude Code's file-based storage).
+    private static func readFromCredentialsFile() -> OAuthCredentials? {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let path = home.appendingPathComponent(".claude/.credentials.json")
+        guard let data = try? Data(contentsOf: path),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return extractCredentials(from: json)
     }
 
     /// Read credentials from macOS Keychain via `security` CLI.
