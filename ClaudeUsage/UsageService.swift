@@ -72,6 +72,7 @@ class UsageService: ObservableObject {
     private let maxInterval: TimeInterval = 300
 
     init() {
+        loadCachedUsage()
         startPolling()
     }
 
@@ -151,6 +152,7 @@ class UsageService: ObservableObject {
                         parseUsageResponse(json2)
                         usage.lastFetched = Date()
                         usage.error = nil
+                        saveCachedUsage()
                         cuLog("401→re-read→OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
                         if refreshInterval != defaultInterval {
                             refreshInterval = defaultInterval
@@ -195,6 +197,7 @@ class UsageService: ObservableObject {
             parseUsageResponse(json)
             usage.lastFetched = Date()
             usage.error = nil
+            saveCachedUsage()
             cuLog("OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
 
             if refreshInterval != defaultInterval {
@@ -212,6 +215,7 @@ class UsageService: ObservableObject {
                     parseUsageResponse(json2)
                     usage.lastFetched = Date()
                     usage.error = nil
+                    saveCachedUsage()
                     cuLog("network→retry→OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
                     if refreshInterval != defaultInterval {
                         refreshInterval = defaultInterval
@@ -287,6 +291,48 @@ class UsageService: ObservableObject {
 
         df.dateFormat = "yyyy-MM-dd'T'HH:mm:ssxxx"
         return df.date(from: string)
+    }
+
+    // MARK: - Persist last-known-good data across launches
+
+    private func saveCachedUsage() {
+        let defaults = UserDefaults.standard
+        defaults.set(usage.sessionPercent, forKey: "cu_sessionPercent")
+        defaults.set(usage.weeklyPercent, forKey: "cu_weeklyPercent")
+        defaults.set(usage.sessionResetTime?.timeIntervalSince1970, forKey: "cu_sessionResetTime")
+        defaults.set(usage.weeklyResetTime?.timeIntervalSince1970, forKey: "cu_weeklyResetTime")
+        defaults.set(usage.lastFetched?.timeIntervalSince1970, forKey: "cu_lastFetched")
+        // Save model limits as array of dicts
+        let models = usage.modelLimits.map { m -> [String: Any] in
+            var d: [String: Any] = ["label": m.label, "percent": m.percent]
+            if let rt = m.resetTime { d["resetTime"] = rt.timeIntervalSince1970 }
+            return d
+        }
+        defaults.set(models, forKey: "cu_modelLimits")
+    }
+
+    private func loadCachedUsage() {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: "cu_sessionPercent") != nil else { return }
+        usage.sessionPercent = defaults.double(forKey: "cu_sessionPercent")
+        usage.weeklyPercent = defaults.double(forKey: "cu_weeklyPercent")
+        if let ts = defaults.object(forKey: "cu_sessionResetTime") as? TimeInterval {
+            usage.sessionResetTime = Date(timeIntervalSince1970: ts)
+        }
+        if let ts = defaults.object(forKey: "cu_weeklyResetTime") as? TimeInterval {
+            usage.weeklyResetTime = Date(timeIntervalSince1970: ts)
+        }
+        if let ts = defaults.object(forKey: "cu_lastFetched") as? TimeInterval {
+            usage.lastFetched = Date(timeIntervalSince1970: ts)
+        }
+        if let models = defaults.array(forKey: "cu_modelLimits") as? [[String: Any]] {
+            usage.modelLimits = models.compactMap { d in
+                guard let label = d["label"] as? String, let percent = d["percent"] as? Double else { return nil }
+                let resetTime = (d["resetTime"] as? TimeInterval).map { Date(timeIntervalSince1970: $0) }
+                return ModelLimit(label: label, percent: percent, resetTime: resetTime)
+            }
+        }
+        cuLog("Loaded cached usage: session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
     }
 
     deinit {
