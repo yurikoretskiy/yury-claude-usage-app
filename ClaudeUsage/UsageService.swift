@@ -156,7 +156,7 @@ class UsageService: ObservableObject {
                         cuLog("401→re-read→OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
                         if refreshInterval != defaultInterval {
                             refreshInterval = defaultInterval
-                            startPolling()
+                            startPolling(fetchImmediately: false)
                         }
                         return
                     }
@@ -202,33 +202,11 @@ class UsageService: ObservableObject {
 
             if refreshInterval != defaultInterval {
                 refreshInterval = defaultInterval
-                startPolling()
+                startPolling(fetchImmediately: false)
             }
 
         } catch {
-            cuLog("Network error: \(error.localizedDescription), retrying in 3s...")
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            do {
-                let (data2, response2) = try await URLSession.shared.data(for: request)
-                if let http2 = response2 as? HTTPURLResponse, http2.statusCode == 200,
-                   let json2 = try JSONSerialization.jsonObject(with: data2) as? [String: Any] {
-                    parseUsageResponse(json2)
-                    usage.lastFetched = Date()
-                    usage.error = nil
-                    saveCachedUsage()
-                    cuLog("network→retry→OK session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
-                    if refreshInterval != defaultInterval {
-                        refreshInterval = defaultInterval
-                        startPolling()
-                    }
-                    return
-                } else if let http2 = response2 as? HTTPURLResponse {
-                    cuLog("network→retry→HTTP \(http2.statusCode)")
-                }
-            } catch {
-                cuLog("network→retry→error: \(error.localizedDescription)")
-            }
-
+            cuLog("Network error: \(error.localizedDescription)")
             refreshInterval = min(refreshInterval * 2, maxInterval)
             cuLog("EXIT: network backoff, next interval=\(Int(refreshInterval))")
             startPolling(fetchImmediately: false)
