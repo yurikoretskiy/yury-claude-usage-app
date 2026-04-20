@@ -1,24 +1,35 @@
 # Compact Mascot Version Snapshots
 
-Each `.swift` file here is a complete copy of `ClaudeUsage/MenuBarRenderer.swift` from a specific iteration of the compact mascot widget. Keep these for easy revert / visual comparison without having to dig through git history.
+Each `.swift` file here is a complete copy of `ClaudeUsage/MenuBarRenderer.swift` from a specific iteration of the compact mascot widget. Keep these for easy revert / visual comparison without digging through git history.
 
 ## Versions
 
 | Version | File | Status | Notes |
 | --- | --- | --- | --- |
-| **v2.18** | [MenuBarRenderer-v2.18.swift](MenuBarRenderer-v2.18.swift) | ✅ **PRIMARY (shipping)** | System-font digits (10pt heavy monospaced, orange) centered in a rounded-top-corner chip with faint `labelColor@0.5` outline. Transparent body. Compact (body 24×12). |
-| v2.7 | [MenuBarRenderer-v2.7.swift](MenuBarRenderer-v2.7.swift) | archived | 3×5 pixel bitmap digits at unit=2, glyph 6×10, coral outline, body 24×14. The "retro mascot" look before the Full-mode alignment work. |
-| v2.6 | [MenuBarRenderer-v2.6.swift](MenuBarRenderer-v2.6.swift) | archived | 5×7 bitmap at unit=1, glyph 5×7, body stroke 0.5. Smaller but too thin → right arm clipped at canvas edge. |
-| v2.8 | [MenuBarRenderer-v2.8.swift](MenuBarRenderer-v2.8.swift) | archived | 3×5 bitmap at unit=1.5 with antialiased digit fills, glyph 4.5×7.5. Softer and more aesthetically balanced than v2.7 but digits read less clearly on a crowded menu bar. |
+| **v2.21** | [MenuBarRenderer-v2.21.swift](MenuBarRenderer-v2.21.swift) | ✅ **PRIMARY (shipping + /Applications/)** | Black body fill (`#0F0F0F`, matches Full-mode pill) + faint `labelColor@0.5` outline + orange 10pt heavy system-font digits. Rounded top corners. |
+| v2.20 | [MenuBarRenderer-v2.20.swift](MenuBarRenderer-v2.20.swift) | archived | Solid `labelColor` body fill with transparent digit cutouts (destinationOut blend). "Status badge" look — visually loudest variant. |
+| v2.18 | [MenuBarRenderer-v2.18.swift](MenuBarRenderer-v2.18.swift) | archived | Transparent body + faint outline + orange digits. Lightweight aesthetic; parent of v2.21. |
+| v2.8 | [MenuBarRenderer-v2.8.swift](MenuBarRenderer-v2.8.swift) | archived | 3×5 bitmap digits at unit=1.5 with antialiased fills, glyph 4.5×7.5. Softer retro look. |
+| v2.7 | [MenuBarRenderer-v2.7.swift](MenuBarRenderer-v2.7.swift) | archived | 3×5 bitmap digits at unit=2, glyph 6×10, coral outline, body 24×14. Original pixel-mascot direction. |
+| v2.6 | [MenuBarRenderer-v2.6.swift](MenuBarRenderer-v2.6.swift) | archived | 5×7 bitmap at unit=1, glyph 5×7, body stroke 0.5. Too thin — right arm clipped. |
 
-## Why v2.7 is primary
+## Why v2.21 is primary
 
 User decision (2026-04-20):
 
-> v2.8 looks more beautiful / more aesthetically balanced, but the visibility isn't good. I decided to bring back the bigger numbers. They look less beautiful, less aligned, but they are better visible and they kind of psychologically motivate me to use Claude. That's the main reason to trace it.
+> Let's keep it because the primal version is also connected to CU, terminal, update the documentation commit to everywhere you need to commit. I just really feel something is not mentioned but I don't know what, maybe the black cover inside with this gray-white border line, maybe it's okay when it's night and dark time, but it's not okay during the day. But at least it's very observability. Yeah, I see the number. I understand what is at Claude. Let's process later.
 
-Visibility + motivational value of a bold, easy-to-read percentage beat visual refinement. v2.8 is preserved here in case a future iteration wants to revisit the softer style.
+The black-body fill provides strong contrast in dark menu bars (night appearance). **Open concern**: may read poorly in LIGHT menu bar appearance (daytime) — the black pill against a light wallpaper could look heavy. Tracked for a future iteration; see [tasks/compact-mascot-future-ideas.md](../tasks/compact-mascot-future-ideas.md).
 
 ## Recreation
 
-To revert to a snapshot: `cp snapshots/MenuBarRenderer-vX.X.swift ClaudeUsage/MenuBarRenderer.swift && ./build-and-run.sh`
+```bash
+# Swap the active renderer for any snapshot, build, and deploy to /Applications/:
+cp snapshots/MenuBarRenderer-vX.X.swift ClaudeUsage/MenuBarRenderer.swift
+swift build
+rm -rf "/Applications/Claude Usage.app"
+cp -R .build/debug/ClaudeUsage.app "/Applications/Claude Usage.app"
+open "/Applications/Claude Usage.app"
+```
+
+`cu` (terminal alias) will launch whatever is installed at `/Applications/Claude Usage.app`, so the deploy above switches which variant `cu` shows.

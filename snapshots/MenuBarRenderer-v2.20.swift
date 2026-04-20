@@ -239,23 +239,26 @@ enum MenuBarRenderer {
                            radius: r)
             path.close()
 
-            // v2.21: near-black body fill (matches Full-mode pill) + faint
-            // labelColor@0.5 outline. Visual continuity with Full widget.
-            backgroundColor.setFill()
+            // v2.20.2: solid labelColor fill (no alpha) so the chip reads the
+            // same tone as other system icons (clock, battery, etc.) — those
+            // are drawn as opaque template images, not translucent.
+            NSColor.labelColor.setFill()
             path.fill()
-            NSColor.labelColor.withAlphaComponent(0.5).setStroke()
-            path.lineWidth = 1.0
-            path.stroke()
 
-            // --- Digits: orange 10pt heavy, centered. ---
+            // --- Digits: drawn with destinationOut blend so they cut TRANSPARENT
+            //     holes through the filled body — menu bar shows through them. ---
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.cgContext.setBlendMode(.destinationOut)
             NSGraphicsContext.current?.shouldAntialias = true
             let pctNumber = "\(Int(round(percentage)))"
             let numFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .heavy)
             let para = NSMutableParagraphStyle()
             para.alignment = .center
+            // Color is ignored by destinationOut except for alpha; use opaque
+            // black so every glyph pixel fully clears the fill beneath.
             let numAttrs: [NSAttributedString.Key: Any] = [
                 .font: numFont,
-                .foregroundColor: orangeColor,
+                .foregroundColor: NSColor.black,
                 .paragraphStyle: para
             ]
             // Single-line rect spanning the full body width; paragraph
@@ -273,6 +276,7 @@ enum MenuBarRenderer {
                 height: lineHeight
             )
             (pctNumber as NSString).draw(in: rect, withAttributes: numAttrs)
+            NSGraphicsContext.restoreGraphicsState()
         }
     }
 }

@@ -56,4 +56,17 @@ If/when modes change via the Display Mode toggle, animate the collapse: Full →
 
 ## Notes from user (verbatim)
 
+### 2026-04-20 — color-unification intent
+
 > Take for the further interactions maybe change color of the borders of the mascot, maybe change all the colors or maybe make the mascot itself black the same way as a full widget, not compacted version. And in the full widget from there bring numbers that are on the right of the full widget, that are on the right side, that it kind of when it's compacting from the full widget it's It is compacted into the black mascot with the same colors. I want also to align the colors, using the full copy and compact copy. Keep it as a to-do plan ideas.
+
+### 2026-04-20 — after shipping v2.21 (black body + orange digit)
+
+> Let's keep it because the primal version is also connected to CU, terminal. I just really feel something is not mentioned but I don't know what, maybe the black cover inside with this gray-white border line, maybe it's okay when it's night and dark time, but it's not okay during the day. But at least it's very observability. Yeah, I see the number.
+
+**Outstanding concern to address later**: the near-black body fill (`backgroundColor = rgb(0.06, 0.06, 0.06)`) gives strong contrast in dark menu-bar appearances (night, dark wallpapers) but may feel heavy or mismatched in LIGHT menu bars (day, light wallpapers). Options to explore in a future round:
+
+- Swap the fill to a `dynamic color` that flips with `NSAppearance` (dark → near-black, light → near-white or a subtle tint)
+- Use `NSColor.controlBackgroundColor` or another semantic background color that inherently adapts
+- Drop the fill in light mode (transparent body + outline only, like v2.18) and keep the black only in dark mode
+- Use a mid-gray fill that reads OK in both modes
