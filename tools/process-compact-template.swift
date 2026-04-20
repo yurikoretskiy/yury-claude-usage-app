@@ -124,7 +124,7 @@ guard let outRep = NSBitmapImageRep(
 
 NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: outRep)
-bgColor.setFill()
+NSColor.clear.setFill()
 NSRect(x: 0, y: 0, width: outSize, height: outSize).fill()
 NSGraphicsContext.current?.cgContext.interpolationQuality = .high
 NSGraphicsContext.current?.cgContext.draw(
@@ -132,6 +132,32 @@ NSGraphicsContext.current?.cgContext.draw(
     in: CGRect(x: drawX, y: drawY, width: drawW, height: drawH)
 )
 NSGraphicsContext.restoreGraphicsState()
+
+// Convert dark background to transparent: alpha scales with "coralness".
+// We keep the original RGB (so the coral texture is preserved) and set alpha
+// from red-channel dominance over green/blue. Pixels with no coral signal
+// become fully transparent; pure coral pixels stay fully opaque.
+if let outData = outRep.bitmapData {
+    let obpr = outRep.bytesPerRow
+    for y in 0..<outSize {
+        for x in 0..<outSize {
+            let i = y * obpr + x * 4
+            let r = Int(outData[i])
+            let g = Int(outData[i+1])
+            let b = Int(outData[i+2])
+            // Coralness: how much red dominates, clamped to [0, 255].
+            let dominance = max(0, r - max(g, b))
+            // Remap: dominance >= 60 → fully opaque; 0 → transparent; linear in between.
+            var alpha = 0
+            if dominance >= 60 {
+                alpha = 255
+            } else if dominance > 10 {
+                alpha = Int(Double(dominance - 10) / 50.0 * 255.0)
+            }
+            outData[i+3] = UInt8(max(0, min(255, alpha)))
+        }
+    }
+}
 
 guard let png = outRep.representation(using: .png, properties: [:]) else { exit(1) }
 let outURL = URL(fileURLWithPath: repo)
