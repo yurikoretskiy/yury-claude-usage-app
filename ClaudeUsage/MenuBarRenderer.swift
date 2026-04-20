@@ -6,22 +6,22 @@ enum MenuBarRenderer {
     static let orangeColor = NSColor(red: 1.0, green: 0.6, blue: 0.0, alpha: 1.0)
     static let dimOrangeColor = NSColor(red: 0.30, green: 0.18, blue: 0.02, alpha: 1.0)
     static let backgroundColor = NSColor(red: 0.06, green: 0.06, blue: 0.06, alpha: 1.0)
+    // Coral sampled from yrojko Gemini reference — used only by compact mode.
+    static let coralColor = NSColor(red: 252.0/255.0, green: 172.0/255.0, blue: 152.0/255.0, alpha: 1.0)
 
     // Cache the logo image (SPM puts resources in Bundle.module)
     private static let logoImage: NSImage? = loadBundledImage(named: "claude-logo")
-    // Cache the Claude Code pixel mascot for compact mode
-    private static let mascotImage: NSImage? = loadBundledImage(named: "claudecode-color")
-    // Compact-mode outline template (Gemini mascot silhouette, text erased)
-    private static let compactTemplate: NSImage? = loadBundledImage(named: "compact-mascot")
 
-    private static func loadBundledImage(named name: String) -> NSImage? {
-        if let url = Bundle.module.url(forResource: name, withExtension: "png"),
-           let img = NSImage(contentsOf: url) { return img }
-        if let url = Bundle.main.url(forResource: name, withExtension: "png"),
-           let img = NSImage(contentsOf: url) { return img }
-        let execURL = Bundle.main.executableURL?.deletingLastPathComponent()
-        if let resURL = execURL?.deletingLastPathComponent().appendingPathComponent("Resources/\(name).png"),
-           let img = NSImage(contentsOf: resURL) { return img }
+    private static func loadBundledImage(named name: String, extensions: [String] = ["png"]) -> NSImage? {
+        for ext in extensions {
+            if let url = Bundle.module.url(forResource: name, withExtension: ext),
+               let img = NSImage(contentsOf: url) { return img }
+            if let url = Bundle.main.url(forResource: name, withExtension: ext),
+               let img = NSImage(contentsOf: url) { return img }
+            let execURL = Bundle.main.executableURL?.deletingLastPathComponent()
+            if let resURL = execURL?.deletingLastPathComponent().appendingPathComponent("Resources/\(name).\(ext)"),
+               let img = NSImage(contentsOf: resURL) { return img }
+        }
         return nil
     }
 
@@ -119,50 +119,109 @@ enum MenuBarRenderer {
         return image
     }
 
-    /// Compact icon: the Gemini-generated mascot template (transparent bg)
-    /// scaled to menu-bar height with natural aspect, plus the live percentage
-    /// in orange centered over the body. Sized to feel comparable to other
-    /// menu-bar widgets (weather, system icons) rather than a tiny 22x22 blob.
-    static func renderCompactMenuBarImage(percentage: Double) -> NSImage {
-        let height: CGFloat = 22
-        let tmplSize = compactTemplate?.size ?? NSSize(width: 2, height: 1)
-        let aspect = tmplSize.width / tmplSize.height
-        let width: CGFloat = max(height, floor(height * aspect))
+    /// 5×7 pixel-digit bitmap. "7" and "5" transcribed from the yrojko Gemini
+    /// reference; other digits drawn in matching chunky retro style. Row 0 = top.
+    private static let pixelDigits5x7: [Character: [String]] = [
+        "0": ["#####", "#...#", "#...#", "#...#", "#...#", "#...#", "#####"],
+        "1": ["..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."],
+        "2": ["#####", "....#", "....#", "#####", "#....", "#....", "#####"],
+        "3": ["#####", "....#", "....#", "#####", "....#", "....#", "#####"],
+        "4": ["#...#", "#...#", "#...#", "#####", "....#", "....#", "....#"],
+        "5": ["#####", "#....", "#....", "####.", "....#", "#...#", ".###."],
+        "6": ["#####", "#....", "#....", "#####", "#...#", "#...#", "#####"],
+        "7": ["#####", "....#", "...#.", "..#..", ".#...", ".#...", ".#..."],
+        "8": ["#####", "#...#", "#...#", "#####", "#...#", "#...#", "#####"],
+        "9": ["#####", "#...#", "#...#", "#####", "....#", "....#", "#####"]
+    ]
 
-        let pctNumber = "\(Int(round(percentage)))"
-        let fontSize: CGFloat
-        switch pctNumber.count {
-        case 1:  fontSize = 14
-        case 2:  fontSize = 12
-        default: fontSize = 9
+    private static func drawPixelDigit(_ digit: Character, at origin: NSPoint, unit: CGFloat) {
+        guard let rows = pixelDigits5x7[digit] else { return }
+        let rowCount = rows.count
+        for (rowIndex, row) in rows.enumerated() {
+            let y = origin.y + CGFloat(rowCount - rowIndex - 1) * unit
+            for (columnIndex, cell) in row.enumerated() where cell == "#" {
+                NSRect(
+                    x: origin.x + CGFloat(columnIndex) * unit,
+                    y: y,
+                    width: unit,
+                    height: unit
+                ).fill()
+            }
         }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .heavy)
+    }
+
+    /// Compact icon: coral chip silhouette drawn procedurally to match yrojko
+    /// (body + 1 pin per side at mid-height + 4 leg stubs at bottom, flat top)
+    /// with 5×7 pixel-digit percentage centered inside.
+    static func renderCompactMenuBarImage(percentage: Double) -> NSImage {
+        let width: CGFloat = 44
+        let height: CGFloat = 22
 
         return NSImage(size: NSSize(width: width, height: height), flippable: false) { _ in
-            NSGraphicsContext.current?.shouldAntialias = true
-            NSGraphicsContext.current?.imageInterpolation = .high
+            NSGraphicsContext.current?.shouldAntialias = false
+            NSGraphicsContext.current?.imageInterpolation = .none
 
-            if let tmpl = compactTemplate {
-                tmpl.draw(in: NSRect(x: 0, y: 0, width: width, height: height),
-                          from: NSRect(origin: .zero, size: tmpl.size),
-                          operation: .sourceOver, fraction: 1.0)
+            // --- Silhouette geometry (all coordinates in px, bottom-left origin) ---
+            let stroke: CGFloat = 1.0
+            let legH: CGFloat = 3.0
+            let sidePad: CGFloat = 4          // leaves room for side pins
+            let topPad: CGFloat = 1           // tiny breathing room at top
+            let bodyRect = NSRect(
+                x: sidePad,
+                y: legH,
+                width: width - 2 * sidePad,
+                height: height - legH - topPad
+            )
+
+            // Side pins: one per side, centered vertically on body
+            let pinW: CGFloat = 3.0
+            let pinH: CGFloat = 6.0
+            let pinY = bodyRect.midY - pinH / 2
+            let leftPin  = NSRect(x: bodyRect.minX - pinW, y: pinY, width: pinW, height: pinH)
+            let rightPin = NSRect(x: bodyRect.maxX,        y: pinY, width: pinW, height: pinH)
+
+            // 4 leg stubs evenly along the bottom edge
+            let legW: CGFloat = 3.0
+            let legCount = 4
+            let legSpan = bodyRect.width - legW
+            let legGap = legSpan / CGFloat(legCount - 1)
+            var legs: [NSRect] = []
+            for i in 0..<legCount {
+                legs.append(NSRect(
+                    x: bodyRect.minX + CGFloat(i) * legGap,
+                    y: 0,
+                    width: legW,
+                    height: legH
+                ))
             }
 
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = .center
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: orangeColor,
-                .paragraphStyle: paragraph
-            ]
-            let textSize = (pctNumber as NSString).size(withAttributes: attrs)
-            // Body center: just above geometric center since leg stubs hang below.
-            let bodyCenterY: CGFloat = height * 0.55
-            let textRect = NSRect(x: 0,
-                                  y: bodyCenterY - textSize.height / 2,
-                                  width: width,
-                                  height: textSize.height)
-            (pctNumber as NSString).draw(in: textRect, withAttributes: attrs)
+            // Stroke all silhouette parts in coral
+            coralColor.setStroke()
+            let bodyPath = NSBezierPath(rect: bodyRect)
+            bodyPath.lineWidth = stroke
+            bodyPath.stroke()
+            for r in [leftPin, rightPin] + legs {
+                let p = NSBezierPath(rect: r)
+                p.lineWidth = stroke
+                p.stroke()
+            }
+
+            // --- Pixel digits centered in the body ---
+            let pctNumber = "\(Int(round(percentage)))"
+            let unit: CGFloat = pctNumber.count >= 3 ? 1.0 : (pctNumber.count == 2 ? 1.5 : 2.0)
+            let glyphW = 5 * unit
+            let glyphH = 7 * unit
+            let glyphGap = unit
+            let totalW = CGFloat(pctNumber.count) * glyphW
+                       + CGFloat(max(0, pctNumber.count - 1)) * glyphGap
+            let startX = round(bodyRect.midX - totalW / 2)
+            let startY = round(bodyRect.midY - glyphH / 2)
+
+            coralColor.setFill()
+            for (index, digit) in pctNumber.enumerated() {
+                let x = startX + CGFloat(index) * (glyphW + glyphGap)
+                drawPixelDigit(digit, at: NSPoint(x: x, y: startY), unit: unit)
+            }
         }
     }
 }

@@ -10,8 +10,7 @@ let package = Package(
             path: "ClaudeUsage",
             resources: [
                 .copy("Resources/claude-logo.png"),
-                .copy("Resources/claudecode-color.png"),
-                .copy("Resources/compact-mascot.png")
+                .copy("Resources/claudecode-color.png")
             ]
         )
     ]

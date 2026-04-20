@@ -1,6 +1,7 @@
 #!/usr/bin/env swift
-// Converts a Gemini-generated icon PNG (coral pixel outline on dark bg with
-// baked-in "75%" and sparkle watermark) into a clean compact-mode template.
+// Converts the chosen Gemini-generated icon PNG into a clean compact-mode
+// template: remove the baked-in number and sparkle, crop to the outline, and
+// output a transparency-safe silhouette for menu-bar rendering.
 //
 // Pipeline:
 //   1. Load source
@@ -16,7 +17,7 @@ import Foundation
 
 let repo = FileManager.default.currentDirectoryPath
 let srcURL = URL(fileURLWithPath: repo)
-    .appendingPathComponent("Gemini_Generated_Image_djxyjndjxyjndjxy.png")
+    .appendingPathComponent("Gemini_Generated_Image_yrojkoyrojkoyroj.png")
 guard let src = NSImage(contentsOf: srcURL) else {
     FileHandle.standardError.write("Could not load \(srcURL.path)\n".data(using: .utf8)!)
     exit(1)
@@ -140,10 +141,9 @@ NSGraphicsContext.current?.cgContext.draw(
 )
 NSGraphicsContext.restoreGraphicsState()
 
-// Convert dark background to transparent: alpha scales with "coralness".
-// We keep the original RGB (so the coral texture is preserved) and set alpha
-// from red-channel dominance over green/blue. Pixels with no coral signal
-// become fully transparent; pure coral pixels stay fully opaque.
+// Convert background to transparent with a hard alpha threshold. Soft alpha was
+// making the menu-bar outline look washed out after scaling; for this icon we
+// want every detected outline pixel fully opaque.
 if let outData = outRep.bitmapData {
     let obpr = outRep.bytesPerRow
     for y in 0..<outH {
@@ -152,16 +152,15 @@ if let outData = outRep.bitmapData {
             let r = Int(outData[i])
             let g = Int(outData[i+1])
             let b = Int(outData[i+2])
-            // Coralness: how much red dominates, clamped to [0, 255].
             let dominance = max(0, r - max(g, b))
-            // Remap: dominance >= 60 → fully opaque; 0 → transparent; linear in between.
-            var alpha = 0
-            if dominance >= 60 {
-                alpha = 255
-            } else if dominance > 10 {
-                alpha = Int(Double(dominance - 10) / 50.0 * 255.0)
+            if dominance >= 24 {
+                outData[i+3] = 255
+            } else {
+                outData[i] = 0
+                outData[i+1] = 0
+                outData[i+2] = 0
+                outData[i+3] = 0
             }
-            outData[i+3] = UInt8(max(0, min(255, alpha)))
         }
     }
 }
