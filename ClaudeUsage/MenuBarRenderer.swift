@@ -150,61 +150,83 @@ enum MenuBarRenderer {
         }
     }
 
-    /// Compact icon: coral chip silhouette drawn procedurally to match yrojko
-    /// (body + 1 pin per side at mid-height + 4 leg stubs at bottom, flat top)
-    /// with 5×7 pixel-digit percentage centered inside.
+    /// Compact icon: yrojko-faithful silhouette drawn as a SINGLE continuous
+    /// coral outline (no internal seams). Path traces body top → down right
+    /// side with a pin notch → across bottom with 4 leg notches (2 on left,
+    /// 2 on right, middle gap) → up left side with a pin notch → close.
+    /// Digit rendering is unchanged for now.
     static func renderCompactMenuBarImage(percentage: Double) -> NSImage {
-        let width: CGFloat = 44
+        let width: CGFloat = 36
         let height: CGFloat = 22
 
         return NSImage(size: NSSize(width: width, height: height), flippable: false) { _ in
             NSGraphicsContext.current?.shouldAntialias = false
             NSGraphicsContext.current?.imageInterpolation = .none
 
-            // --- Silhouette geometry (all coordinates in px, bottom-left origin) ---
-            let stroke: CGFloat = 1.0
-            let legH: CGFloat = 3.0
-            let sidePad: CGFloat = 4          // leaves room for side pins
-            let topPad: CGFloat = 1           // tiny breathing room at top
-            let bodyRect = NSRect(
-                x: sidePad,
-                y: legH,
-                width: width - 2 * sidePad,
-                height: height - legH - topPad
-            )
+            // --- Layout constants tuned to yrojko proportions (scaled to 22px tall) ---
+            let bodyL: CGFloat = 5        // body left edge (inside left pin)
+            let bodyR: CGFloat = 31       // body right edge (inside right pin)
+            let bodyTop: CGFloat = 21     // 1px top pad
+            let bodyBot: CGFloat = 4      // legs extend below to y=0
+            // Pin geometry (62% vertical position from body top)
+            let pinTop: CGFloat = 12
+            let pinBot: CGFloat = 8
+            let leftPinX: CGFloat = 0
+            let rightPinX: CGFloat = 36
+            // Leg X edges (4 legs: 2 left-cluster, 2 right-cluster, middle gap)
+            // Centers at 12.5%, 29%, 71%, 87.5% of body width; each leg 2px wide
+            let legY: CGFloat = 0
+            let l1L: CGFloat = 7,  l1R: CGFloat = 9
+            let l2L: CGFloat = 12, l2R: CGFloat = 14
+            let l3L: CGFloat = 22, l3R: CGFloat = 24
+            let l4L: CGFloat = 27, l4R: CGFloat = 29
 
-            // Side pins: one per side, centered vertically on body
-            let pinW: CGFloat = 3.0
-            let pinH: CGFloat = 6.0
-            let pinY = bodyRect.midY - pinH / 2
-            let leftPin  = NSRect(x: bodyRect.minX - pinW, y: pinY, width: pinW, height: pinH)
-            let rightPin = NSRect(x: bodyRect.maxX,        y: pinY, width: pinW, height: pinH)
+            // --- Build single continuous path (counter-clockwise from top-left) ---
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: bodyL, y: bodyTop))
+            // Top edge
+            path.line(to: NSPoint(x: bodyR, y: bodyTop))
+            // Down right side to right-pin top
+            path.line(to: NSPoint(x: bodyR, y: pinTop))
+            // Right pin: out, down, back in
+            path.line(to: NSPoint(x: rightPinX, y: pinTop))
+            path.line(to: NSPoint(x: rightPinX, y: pinBot))
+            path.line(to: NSPoint(x: bodyR,     y: pinBot))
+            // Down to body bottom-right
+            path.line(to: NSPoint(x: bodyR, y: bodyBot))
+            // Across bottom with 4 leg notches (right-cluster first going left)
+            path.line(to: NSPoint(x: l4R, y: bodyBot))
+            path.line(to: NSPoint(x: l4R, y: legY))
+            path.line(to: NSPoint(x: l4L, y: legY))
+            path.line(to: NSPoint(x: l4L, y: bodyBot))
+            path.line(to: NSPoint(x: l3R, y: bodyBot))
+            path.line(to: NSPoint(x: l3R, y: legY))
+            path.line(to: NSPoint(x: l3L, y: legY))
+            path.line(to: NSPoint(x: l3L, y: bodyBot))
+            // Middle gap (no legs)
+            path.line(to: NSPoint(x: l2R, y: bodyBot))
+            path.line(to: NSPoint(x: l2R, y: legY))
+            path.line(to: NSPoint(x: l2L, y: legY))
+            path.line(to: NSPoint(x: l2L, y: bodyBot))
+            path.line(to: NSPoint(x: l1R, y: bodyBot))
+            path.line(to: NSPoint(x: l1R, y: legY))
+            path.line(to: NSPoint(x: l1L, y: legY))
+            path.line(to: NSPoint(x: l1L, y: bodyBot))
+            // Body bottom-left
+            path.line(to: NSPoint(x: bodyL, y: bodyBot))
+            // Up left side to left-pin bottom
+            path.line(to: NSPoint(x: bodyL, y: pinBot))
+            // Left pin: out, up, back in
+            path.line(to: NSPoint(x: leftPinX, y: pinBot))
+            path.line(to: NSPoint(x: leftPinX, y: pinTop))
+            path.line(to: NSPoint(x: bodyL,    y: pinTop))
+            // Close to top-left
+            path.close()
 
-            // 4 leg stubs evenly along the bottom edge
-            let legW: CGFloat = 3.0
-            let legCount = 4
-            let legSpan = bodyRect.width - legW
-            let legGap = legSpan / CGFloat(legCount - 1)
-            var legs: [NSRect] = []
-            for i in 0..<legCount {
-                legs.append(NSRect(
-                    x: bodyRect.minX + CGFloat(i) * legGap,
-                    y: 0,
-                    width: legW,
-                    height: legH
-                ))
-            }
-
-            // Stroke all silhouette parts in coral
             coralColor.setStroke()
-            let bodyPath = NSBezierPath(rect: bodyRect)
-            bodyPath.lineWidth = stroke
-            bodyPath.stroke()
-            for r in [leftPin, rightPin] + legs {
-                let p = NSBezierPath(rect: r)
-                p.lineWidth = stroke
-                p.stroke()
-            }
+            path.lineWidth = 1.0
+            path.lineJoinStyle = .miter
+            path.stroke()
 
             // --- Pixel digits centered in the body ---
             let pctNumber = "\(Int(round(percentage)))"
@@ -214,8 +236,10 @@ enum MenuBarRenderer {
             let glyphGap = unit
             let totalW = CGFloat(pctNumber.count) * glyphW
                        + CGFloat(max(0, pctNumber.count - 1)) * glyphGap
-            let startX = round(bodyRect.midX - totalW / 2)
-            let startY = round(bodyRect.midY - glyphH / 2)
+            let bodyMidX = (bodyL + bodyR) / 2
+            let bodyMidY = (bodyBot + bodyTop) / 2
+            let startX = round(bodyMidX - totalW / 2)
+            let startY = round(bodyMidY - glyphH / 2)
 
             coralColor.setFill()
             for (index, digit) in pctNumber.enumerated() {
