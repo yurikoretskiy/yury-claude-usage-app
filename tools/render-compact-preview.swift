@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
-// Preview the current compact icon (Gemini template, orange-tinted) at
-// native 22x22 on light + dark strips and at 6x zoom. Matches the live renderer.
+// Preview the current compact icon — simply draws the template PNG and
+// overlays the percentage, matching the production renderer exactly.
 
 import AppKit
 import Foundation
@@ -10,57 +10,22 @@ let tmplURL = URL(fileURLWithPath: repo).appendingPathComponent("ClaudeUsage/Res
 let template = NSImage(contentsOf: tmplURL)!
 let orange = NSColor(red: 1.0, green: 0.6, blue: 0.0, alpha: 1.0)
 
-func outlineMask(from tmpl: NSImage, size: CGFloat) -> NSImage? {
-    let px = Int(size * 2)
-    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
-        pixelsWide: px, pixelsHigh: px,
-        bitsPerSample: 8, samplesPerPixel: 4,
-        hasAlpha: true, isPlanar: false,
-        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 32) else { return nil }
-    NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    NSColor.white.setFill()
-    NSRect(x: 0, y: 0, width: px, height: px).fill()
-    NSGraphicsContext.current?.imageInterpolation = .high
-    tmpl.draw(in: NSRect(x: 0, y: 0, width: px, height: px),
-              from: NSRect(origin: .zero, size: tmpl.size),
-              operation: .sourceOver, fraction: 1.0)
-    NSGraphicsContext.restoreGraphicsState()
-    guard let data = rep.bitmapData else { return nil }
-    let bpr = rep.bytesPerRow
-    for y in 0..<px {
-        for x in 0..<px {
-            let i = y * bpr + x * 4
-            let lum = (Int(data[i]) + Int(data[i+1]) + Int(data[i+2])) / 3
-            data[i] = 0; data[i+1] = 0; data[i+2] = 0
-            data[i+3] = UInt8(max(0, 255 - lum))
-        }
-    }
-    let out = NSImage(size: NSSize(width: size, height: size))
-    out.addRepresentation(rep)
-    return out
-}
-
 func renderCompact(percentage: Double, size: CGFloat) -> NSImage {
     let scale = size / 22
     let pctNumber = "\(Int(round(percentage)))"
     let baseFont: CGFloat
     switch pctNumber.count {
-    case 1:  baseFont = 12
-    case 2:  baseFont = 10
-    default: baseFont = 8
+    case 1:  baseFont = 11
+    case 2:  baseFont = 9
+    default: baseFont = 7
     }
     let font = NSFont.monospacedDigitSystemFont(ofSize: baseFont * scale, weight: .heavy)
     let img = NSImage(size: NSSize(width: size, height: size))
     img.lockFocus()
     NSGraphicsContext.current?.imageInterpolation = .high
-    if let mask = outlineMask(from: template, size: size) {
-        orange.setFill()
-        NSRect(x: 0, y: 0, width: size, height: size).fill()
-        mask.draw(in: NSRect(x: 0, y: 0, width: size, height: size),
-                  from: NSRect(origin: .zero, size: mask.size),
-                  operation: .destinationIn, fraction: 1.0)
-    }
+    template.draw(in: NSRect(x: 0, y: 0, width: size, height: size),
+                  from: NSRect(origin: .zero, size: template.size),
+                  operation: .sourceOver, fraction: 1.0)
     let p = NSMutableParagraphStyle(); p.alignment = .center
     let attrs: [NSAttributedString.Key: Any] = [
         .font: font, .foregroundColor: orange, .paragraphStyle: p
@@ -99,7 +64,6 @@ let subAttrs: [NSAttributedString.Key: Any] = [
     .foregroundColor: NSColor(white: 0.75, alpha: 1.0)
 ]
 
-// Top: native size on light + dark strips
 let lightY = total - pad - labelH - stripH
 NSColor(white: 0.95, alpha: 1.0).setFill()
 NSRect(x: pad, y: lightY, width: zoomRowW - pad * 2, height: stripH).fill()
@@ -123,7 +87,6 @@ for (i, pct) in samples.enumerated() {
              from: .zero, operation: .sourceOver, fraction: 1.0)
 }
 
-// Bottom: 8x zoom
 let zoomY = pad
 ("8x zoom" as NSString).draw(at: NSPoint(x: pad, y: zoomY + zoomed + 4),
                               withAttributes: subAttrs)
