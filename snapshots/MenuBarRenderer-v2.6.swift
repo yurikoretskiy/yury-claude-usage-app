@@ -119,25 +119,22 @@ enum MenuBarRenderer {
         return image
     }
 
-    /// 3×5 pixel-digit bitmap (chunky, for unit=2 rendering → 2px strokes, bold).
-    /// Preserves yrojko character: stair-step "7", curved-bottom "5".
-    private static let pixelDigits3x5: [Character: [String]] = [
-        "0": ["###", "#.#", "#.#", "#.#", "###"],
-        "1": [".#.", "##.", ".#.", ".#.", "###"],
-        "2": ["###", "..#", "###", "#..", "###"],
-        "3": ["###", "..#", ".##", "..#", "###"],
-        "4": ["#.#", "#.#", "###", "..#", "..#"],
-        "5": ["###", "#..", "##.", "..#", "##."],
-        "6": ["###", "#..", "###", "#.#", "###"],
-        "7": ["###", "..#", ".#.", "#..", "#.."],
-        "8": ["###", "#.#", "###", "#.#", "###"],
-        "9": ["###", "#.#", "###", "..#", "###"]
+    /// 5×7 pixel-digit bitmap (v2.6 font: 7 and 5 transcribed from yrojko).
+    private static let pixelDigits5x7: [Character: [String]] = [
+        "0": ["#####", "#...#", "#...#", "#...#", "#...#", "#...#", "#####"],
+        "1": ["..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."],
+        "2": ["#####", "....#", "....#", "#####", "#....", "#....", "#####"],
+        "3": ["#####", "....#", "....#", "#####", "....#", "....#", "#####"],
+        "4": ["#...#", "#...#", "#...#", "#####", "....#", "....#", "....#"],
+        "5": ["#####", "#....", "#....", "####.", "....#", "#...#", ".###."],
+        "6": ["#####", "#....", "#....", "#####", "#...#", "#...#", "#####"],
+        "7": ["#####", "....#", "...#.", "..#..", ".#...", ".#...", ".#..."],
+        "8": ["#####", "#...#", "#...#", "#####", "#...#", "#...#", "#####"],
+        "9": ["#####", "#...#", "#...#", "#####", "....#", "....#", "#####"]
     ]
 
-    /// Draw a 3×5 bitmap digit at `origin` with each "#" cell as a
-    /// `unit`×`unit` filled square (no overlap; unit should be ≥2 for boldness).
     private static func drawPixelDigit(_ digit: Character, at origin: NSPoint, unit: CGFloat) {
-        guard let rows = pixelDigits3x5[digit] else { return }
+        guard let rows = pixelDigits5x7[digit] else { return }
         let rowCount = rows.count
         for (rowIndex, row) in rows.enumerated() {
             let y = origin.y + CGFloat(rowCount - rowIndex - 1) * unit
@@ -227,19 +224,17 @@ enum MenuBarRenderer {
             path.close()
 
             coralColor.setStroke()
-            path.lineWidth = 1.0
+            // v2.6: thin outline (0.5pt) — note: right arm clips at x=32 edge.
+            path.lineWidth = 0.5
             path.lineJoinStyle = .miter
             path.stroke()
 
-            // --- Pixel digits centered on body mid-y ---
-            // 3×5 bitmap at unit=2 for 1-2 digits → glyph 6×10 px, 2-pixel bold
-            // strokes (double the body outline for clear yrojko-style contrast).
-            // unit=1 for 3-digit case (100%) → glyph 3×5, still legible.
+            // --- v2.6 digits: 5×7 at unit=1, glyph 5×7, strokes 1px (thin). ---
             let pctNumber = "\(Int(round(percentage)))"
-            let unit: CGFloat = pctNumber.count >= 3 ? 1.0 : 2.0
-            let glyphW = 3 * unit
-            let glyphH = 5 * unit
-            let glyphGap: CGFloat = unit    // gap equals one cell, gives integer totals
+            let unit: CGFloat = 1.0
+            let glyphW = 5 * unit
+            let glyphH = 7 * unit
+            let glyphGap: CGFloat = (pctNumber.count == 2 ? 2.0 : 1.0)
             let totalW = CGFloat(pctNumber.count) * glyphW
                        + CGFloat(max(0, pctNumber.count - 1)) * glyphGap
             let bodyMidX = (bodyL + bodyR) / 2    // 16
