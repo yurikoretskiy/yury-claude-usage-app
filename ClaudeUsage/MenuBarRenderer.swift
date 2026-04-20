@@ -8,25 +8,20 @@ enum MenuBarRenderer {
     static let backgroundColor = NSColor(red: 0.06, green: 0.06, blue: 0.06, alpha: 1.0)
 
     // Cache the logo image (SPM puts resources in Bundle.module)
-    private static let logoImage: NSImage? = {
-        // Try Bundle.module first (SPM resource bundle)
-        if let url = Bundle.module.url(forResource: "claude-logo", withExtension: "png"),
-           let img = NSImage(contentsOf: url) {
-            return img
-        }
-        // Fallback: check main bundle Resources folder (for .app bundle)
-        if let url = Bundle.main.url(forResource: "claude-logo", withExtension: "png"),
-           let img = NSImage(contentsOf: url) {
-            return img
-        }
-        // Fallback: check alongside the executable
+    private static let logoImage: NSImage? = loadBundledImage(named: "claude-logo")
+    // Cache the Claude Code pixel mascot for compact mode
+    private static let mascotImage: NSImage? = loadBundledImage(named: "claudecode-color")
+
+    private static func loadBundledImage(named name: String) -> NSImage? {
+        if let url = Bundle.module.url(forResource: name, withExtension: "png"),
+           let img = NSImage(contentsOf: url) { return img }
+        if let url = Bundle.main.url(forResource: name, withExtension: "png"),
+           let img = NSImage(contentsOf: url) { return img }
         let execURL = Bundle.main.executableURL?.deletingLastPathComponent()
-        if let resURL = execURL?.deletingLastPathComponent().appendingPathComponent("Resources/claude-logo.png"),
-           let img = NSImage(contentsOf: resURL) {
-            return img
-        }
+        if let resURL = execURL?.deletingLastPathComponent().appendingPathComponent("Resources/\(name).png"),
+           let img = NSImage(contentsOf: resURL) { return img }
         return nil
-    }()
+    }
 
     static func renderMenuBarImage(percentage: Double) -> NSImage {
         let height: CGFloat = 22
@@ -120,6 +115,59 @@ enum MenuBarRenderer {
         }
 
         return image
+    }
+
+    /// 22x22 compact icon: Claude Code pixel mascot with the usage percentage
+    /// centered over the torso in white.
+    static func renderCompactMenuBarImage(percentage: Double) -> NSImage {
+        let size: CGFloat = 22
+        let pctNumber = "\(Int(round(percentage)))"
+        let fontSize: CGFloat
+        switch pctNumber.count {
+        case 1:  fontSize = 12
+        case 2:  fontSize = 10
+        default: fontSize = 8
+        }
+        let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .heavy)
+
+        return NSImage(size: NSSize(width: size, height: size), flippable: false) { _ in
+            NSGraphicsContext.current?.shouldAntialias = true
+            NSGraphicsContext.current?.imageInterpolation = .none
+
+            let canvas = NSRect(x: 0, y: 0, width: size, height: size)
+            if let mascot = mascotImage {
+                mascot.draw(in: canvas,
+                            from: NSRect(origin: .zero, size: mascot.size),
+                            operation: .sourceOver,
+                            fraction: 1.0)
+            }
+
+            // Re-enable AA for the text pass
+            NSGraphicsContext.current?.shouldAntialias = true
+            NSGraphicsContext.current?.imageInterpolation = .high
+
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+
+            let strokeWidth: CGFloat = -8  // negative = stroke + fill
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.white,
+                .strokeColor: NSColor(white: 0, alpha: 0.55),
+                .strokeWidth: strokeWidth,
+                .paragraphStyle: paragraph
+            ]
+            let textSize = (pctNumber as NSString).size(withAttributes: attrs)
+            // Torso center sits just below geometric center of the 22x22 canvas
+            let torsoCenterY: CGFloat = size * 0.42
+            let textRect = NSRect(
+                x: 0,
+                y: torsoCenterY - textSize.height / 2,
+                width: size,
+                height: textSize.height
+            )
+            (pctNumber as NSString).draw(in: textRect, withAttributes: attrs)
+        }
     }
 }
 
