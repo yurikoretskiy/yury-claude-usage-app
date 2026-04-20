@@ -119,26 +119,31 @@ enum MenuBarRenderer {
         return image
     }
 
-    /// 22x22 compact icon: draws the Gemini-generated mascot template
-    /// (coral outline on dark chip background) and overlays the live percentage
-    /// in the widget's orange over the body center.
+    /// Compact icon: the Gemini-generated mascot template (transparent bg)
+    /// scaled to menu-bar height with natural aspect, plus the live percentage
+    /// in orange centered over the body. Sized to feel comparable to other
+    /// menu-bar widgets (weather, system icons) rather than a tiny 22x22 blob.
     static func renderCompactMenuBarImage(percentage: Double) -> NSImage {
-        let size: CGFloat = 22
+        let height: CGFloat = 22
+        let tmplSize = compactTemplate?.size ?? NSSize(width: 2, height: 1)
+        let aspect = tmplSize.width / tmplSize.height
+        let width: CGFloat = max(height, floor(height * aspect))
+
         let pctNumber = "\(Int(round(percentage)))"
         let fontSize: CGFloat
         switch pctNumber.count {
-        case 1:  fontSize = 11
-        case 2:  fontSize = 9
-        default: fontSize = 7
+        case 1:  fontSize = 14
+        case 2:  fontSize = 12
+        default: fontSize = 9
         }
         let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .heavy)
 
-        return NSImage(size: NSSize(width: size, height: size), flippable: false) { _ in
+        return NSImage(size: NSSize(width: width, height: height), flippable: false) { _ in
             NSGraphicsContext.current?.shouldAntialias = true
             NSGraphicsContext.current?.imageInterpolation = .high
 
             if let tmpl = compactTemplate {
-                tmpl.draw(in: NSRect(x: 0, y: 0, width: size, height: size),
+                tmpl.draw(in: NSRect(x: 0, y: 0, width: width, height: height),
                           from: NSRect(origin: .zero, size: tmpl.size),
                           operation: .sourceOver, fraction: 1.0)
             }
@@ -151,11 +156,11 @@ enum MenuBarRenderer {
                 .paragraphStyle: paragraph
             ]
             let textSize = (pctNumber as NSString).size(withAttributes: attrs)
-            // Body center sits slightly above geometric center (legs extend below)
-            let bodyCenterY: CGFloat = size * 0.52
+            // Body center: just above geometric center since leg stubs hang below.
+            let bodyCenterY: CGFloat = height * 0.55
             let textRect = NSRect(x: 0,
                                   y: bodyCenterY - textSize.height / 2,
-                                  width: size,
+                                  width: width,
                                   height: textSize.height)
             (pctNumber as NSString).draw(in: textRect, withAttributes: attrs)
         }

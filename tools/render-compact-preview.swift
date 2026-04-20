@@ -10,20 +10,22 @@ let tmplURL = URL(fileURLWithPath: repo).appendingPathComponent("ClaudeUsage/Res
 let template = NSImage(contentsOf: tmplURL)!
 let orange = NSColor(red: 1.0, green: 0.6, blue: 0.0, alpha: 1.0)
 
-func renderCompact(percentage: Double, size: CGFloat) -> NSImage {
-    let scale = size / 22
+func renderCompact(percentage: Double, height: CGFloat) -> NSImage {
+    let scale = height / 22
+    let aspect = template.size.width / template.size.height
+    let width = max(height, floor(height * aspect))
     let pctNumber = "\(Int(round(percentage)))"
     let baseFont: CGFloat
     switch pctNumber.count {
-    case 1:  baseFont = 11
-    case 2:  baseFont = 9
-    default: baseFont = 7
+    case 1:  baseFont = 14
+    case 2:  baseFont = 12
+    default: baseFont = 9
     }
     let font = NSFont.monospacedDigitSystemFont(ofSize: baseFont * scale, weight: .heavy)
-    let img = NSImage(size: NSSize(width: size, height: size))
+    let img = NSImage(size: NSSize(width: width, height: height))
     img.lockFocus()
     NSGraphicsContext.current?.imageInterpolation = .high
-    template.draw(in: NSRect(x: 0, y: 0, width: size, height: size),
+    template.draw(in: NSRect(x: 0, y: 0, width: width, height: height),
                   from: NSRect(origin: .zero, size: template.size),
                   operation: .sourceOver, fraction: 1.0)
     let p = NSMutableParagraphStyle(); p.alignment = .center
@@ -31,25 +33,28 @@ func renderCompact(percentage: Double, size: CGFloat) -> NSImage {
         .font: font, .foregroundColor: orange, .paragraphStyle: p
     ]
     let ts = (pctNumber as NSString).size(withAttributes: attrs)
-    let bodyCY = size * 0.52
+    let bodyCY = height * 0.55
     (pctNumber as NSString).draw(in: NSRect(x: 0, y: bodyCY - ts.height / 2,
-                                            width: size, height: ts.height),
+                                            width: width, height: ts.height),
                                  withAttributes: attrs)
     img.unlockFocus()
     return img
 }
 
 let samples: [Double] = [8, 38, 75, 100]
-let native: CGFloat = 22
+let nativeH: CGFloat = 22
 let zoom: CGFloat = 8
 let pad: CGFloat = 20
 let gap: CGFloat = 14
 
-let zoomed = native * zoom
-let zoomRowW = pad * 2 + CGFloat(samples.count) * zoomed + CGFloat(samples.count - 1) * gap
+let aspect = template.size.width / template.size.height
+let nativeW = max(nativeH, floor(nativeH * aspect))
+let zoomedH = nativeH * zoom
+let zoomedW = nativeW * zoom
+let zoomRowW = pad * 2 + CGFloat(samples.count) * zoomedW + CGFloat(samples.count - 1) * gap
 let stripH: CGFloat = 34
 let labelH: CGFloat = 20
-let total = pad + labelH + stripH + 4 + stripH + pad + labelH + zoomed + pad
+let total = pad + labelH + stripH + 4 + stripH + pad + labelH + zoomedH + pad
 let sheet = NSImage(size: NSSize(width: zoomRowW, height: total))
 sheet.lockFocus()
 NSColor(white: 0.14, alpha: 1.0).setFill()
@@ -75,25 +80,25 @@ NSColor(white: 0.08, alpha: 1.0).setFill()
 NSRect(x: pad, y: darkY, width: zoomRowW - pad * 2, height: stripH).fill()
 
 let stripInnerPad: CGFloat = 30
-let spacing = (zoomRowW - pad * 2 - CGFloat(samples.count) * native - stripInnerPad * 2) / CGFloat(samples.count - 1)
+let spacing = (zoomRowW - pad * 2 - CGFloat(samples.count) * nativeW - stripInnerPad * 2) / CGFloat(samples.count - 1)
 for (i, pct) in samples.enumerated() {
-    let img = renderCompact(percentage: pct, size: native)
-    let x = pad + stripInnerPad + CGFloat(i) * (native + spacing)
-    img.draw(in: NSRect(x: x, y: lightY + (stripH - native) / 2,
-                        width: native, height: native),
+    let img = renderCompact(percentage: pct, height: nativeH)
+    let x = pad + stripInnerPad + CGFloat(i) * (nativeW + spacing)
+    img.draw(in: NSRect(x: x, y: lightY + (stripH - nativeH) / 2,
+                        width: nativeW, height: nativeH),
              from: .zero, operation: .sourceOver, fraction: 1.0)
-    img.draw(in: NSRect(x: x, y: darkY + (stripH - native) / 2,
-                        width: native, height: native),
+    img.draw(in: NSRect(x: x, y: darkY + (stripH - nativeH) / 2,
+                        width: nativeW, height: nativeH),
              from: .zero, operation: .sourceOver, fraction: 1.0)
 }
 
 let zoomY = pad
-("8x zoom" as NSString).draw(at: NSPoint(x: pad, y: zoomY + zoomed + 4),
+("8x zoom" as NSString).draw(at: NSPoint(x: pad, y: zoomY + zoomedH + 4),
                               withAttributes: subAttrs)
 for (i, pct) in samples.enumerated() {
-    let img = renderCompact(percentage: pct, size: zoomed)
-    let x = pad + CGFloat(i) * (zoomed + gap)
-    img.draw(in: NSRect(x: x, y: zoomY, width: zoomed, height: zoomed),
+    let img = renderCompact(percentage: pct, height: zoomedH)
+    let x = pad + CGFloat(i) * (zoomedW + gap)
+    img.draw(in: NSRect(x: x, y: zoomY, width: zoomedW, height: zoomedH),
              from: .zero, operation: .sourceOver, fraction: 1.0)
 }
 

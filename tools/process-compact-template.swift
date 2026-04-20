@@ -90,13 +90,20 @@ if minX >= maxX {
 }
 print("Coral bbox: x=\(minX)-\(maxX) y=\(minY)-\(maxY)")
 
-let pad = 30
+// Truncate Y at body bottom — the legs sit below and consume vertical space
+// that would otherwise shrink the body+number in the menu bar. Keep a short
+// stub so the icon still reads as "legged", but don't give them a quarter of the height.
+let fullHeight = maxY - minY
+let bodyBottom = minY + Int(Double(fullHeight) * 0.82)
+maxY = bodyBottom
+
+let pad = 12
 minX = max(0, minX - pad)
 minY = max(0, minY - pad)
 maxX = min(w - 1, maxX + pad)
 maxY = min(h - 1, maxY + pad)
 
-// Crop to bbox (preserve aspect) then paste into a square canvas with bg padding
+// Crop to bbox (preserve natural aspect — no square padding)
 let bbW = maxX - minX + 1
 let bbH = maxY - minY + 1
 
@@ -104,18 +111,18 @@ guard let cg = rep.cgImage,
       let sub = cg.cropping(to: CGRect(x: minX, y: minY, width: bbW, height: bbH))
 else { exit(1) }
 
-// Render into a square canvas sized to the longer edge; fill with bg color first
-let side = max(bbW, bbH)
-let outSize = 256
-let scale = CGFloat(outSize) / CGFloat(side)
-let drawW = CGFloat(bbW) * scale
-let drawH = CGFloat(bbH) * scale
-let drawX = (CGFloat(outSize) - drawW) / 2
-let drawY = (CGFloat(outSize) - drawH) / 2
+// Output sized to keep aspect with height = 256
+let outH = 256
+let aspect = Double(bbW) / Double(bbH)
+let outW = Int(round(Double(outH) * aspect))
+let drawX: CGFloat = 0
+let drawY: CGFloat = 0
+let drawW = CGFloat(outW)
+let drawH = CGFloat(outH)
 
 guard let outRep = NSBitmapImageRep(
     bitmapDataPlanes: nil,
-    pixelsWide: outSize, pixelsHigh: outSize,
+    pixelsWide: outW, pixelsHigh: outH,
     bitsPerSample: 8, samplesPerPixel: 4,
     hasAlpha: true, isPlanar: false,
     colorSpaceName: .deviceRGB,
@@ -125,7 +132,7 @@ guard let outRep = NSBitmapImageRep(
 NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: outRep)
 NSColor.clear.setFill()
-NSRect(x: 0, y: 0, width: outSize, height: outSize).fill()
+NSRect(x: 0, y: 0, width: outW, height: outH).fill()
 NSGraphicsContext.current?.cgContext.interpolationQuality = .high
 NSGraphicsContext.current?.cgContext.draw(
     sub,
@@ -139,8 +146,8 @@ NSGraphicsContext.restoreGraphicsState()
 // become fully transparent; pure coral pixels stay fully opaque.
 if let outData = outRep.bitmapData {
     let obpr = outRep.bytesPerRow
-    for y in 0..<outSize {
-        for x in 0..<outSize {
+    for y in 0..<outH {
+        for x in 0..<outW {
             let i = y * obpr + x * 4
             let r = Int(outData[i])
             let g = Int(outData[i+1])
