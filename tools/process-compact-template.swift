@@ -16,7 +16,7 @@ import Foundation
 
 let repo = FileManager.default.currentDirectoryPath
 let srcURL = URL(fileURLWithPath: repo)
-    .appendingPathComponent("Gemini_Generated_Image_aswh90aswh90aswh.png")
+    .appendingPathComponent("Gemini_Generated_Image_djxyjndjxyjndjxy.png")
 guard let src = NSImage(contentsOf: srcURL) else {
     FileHandle.standardError.write("Could not load \(srcURL.path)\n".data(using: .utf8)!)
     exit(1)
@@ -60,8 +60,8 @@ bgColor.setFill()
 // Erase "75%" — covers full digit span including "%" slash/circles
 let fx = CGFloat(w)
 let fy = CGFloat(h)
-let eraseText = NSRect(x: fx * 0.22, y: fy * 0.28,
-                       width: fx * 0.56, height: fy * 0.44)
+let eraseText = NSRect(x: fx * 0.16, y: fy * 0.24,
+                       width: fx * 0.68, height: fy * 0.50)
 eraseText.fill()
 
 // Erase Gemini sparkle in bottom-right corner (~last 8%)
