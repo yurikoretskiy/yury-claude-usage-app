@@ -4,6 +4,7 @@ import AppKit
 @main
 struct ClaudeUsageApp: App {
     @StateObject private var usageService = UsageService()
+    @StateObject private var modeStore = DisplayModeStore()
 
     // Prevent App Nap from freezing our polling timer when terminal is closed
     private let activity = ProcessInfo.processInfo.beginActivity(
@@ -13,11 +14,12 @@ struct ClaudeUsageApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            DetailPopover(usageService: usageService)
+            DetailPopover(usageService: usageService, modeStore: modeStore)
         } label: {
-            Image(nsImage: MenuBarRenderer.renderMenuBarImage(
-                percentage: usageService.usage.sessionPercent
-            ))
+            let pct = usageService.usage.sessionPercent
+            Image(nsImage: modeStore.effectiveMode == .compact
+                  ? MenuBarRenderer.renderCompactMenuBarImage(percentage: pct)
+                  : MenuBarRenderer.renderMenuBarImage(percentage: pct))
         }
         .menuBarExtraStyle(.window)
     }

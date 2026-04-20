@@ -117,16 +117,16 @@ enum MenuBarRenderer {
         return image
     }
 
-    /// 22x22 compact icon: Claude Code pixel mascot with the usage percentage
-    /// centered over the torso in white.
+    /// 22x22 compact icon: desaturated Claude Code mascot silhouette as background,
+    /// large orange percentage number centered on top.
     static func renderCompactMenuBarImage(percentage: Double) -> NSImage {
         let size: CGFloat = 22
         let pctNumber = "\(Int(round(percentage)))"
         let fontSize: CGFloat
         switch pctNumber.count {
-        case 1:  fontSize = 12
-        case 2:  fontSize = 10
-        default: fontSize = 8
+        case 1:  fontSize = 15
+        case 2:  fontSize = 12
+        default: fontSize = 9
         }
         let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .heavy)
 
@@ -135,37 +135,33 @@ enum MenuBarRenderer {
             NSGraphicsContext.current?.imageInterpolation = .none
 
             let canvas = NSRect(x: 0, y: 0, width: size, height: size)
+
+            // Draw mascot, then overlay a semi-transparent gray with .sourceAtop to
+            // desaturate it into a subtle background silhouette.
             if let mascot = mascotImage {
                 mascot.draw(in: canvas,
                             from: NSRect(origin: .zero, size: mascot.size),
                             operation: .sourceOver,
                             fraction: 1.0)
+                NSColor(white: 0.5, alpha: 0.45).set()
+                canvas.fill(using: .sourceAtop)
             }
 
-            // Re-enable AA for the text pass
             NSGraphicsContext.current?.shouldAntialias = true
             NSGraphicsContext.current?.imageInterpolation = .high
 
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment = .center
-
-            let strokeWidth: CGFloat = -8  // negative = stroke + fill
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
-                .foregroundColor: NSColor.white,
-                .strokeColor: NSColor(white: 0, alpha: 0.55),
-                .strokeWidth: strokeWidth,
+                .foregroundColor: orangeColor,
                 .paragraphStyle: paragraph
             ]
             let textSize = (pctNumber as NSString).size(withAttributes: attrs)
-            // Torso center sits just below geometric center of the 22x22 canvas
-            let torsoCenterY: CGFloat = size * 0.42
-            let textRect = NSRect(
-                x: 0,
-                y: torsoCenterY - textSize.height / 2,
-                width: size,
-                height: textSize.height
-            )
+            let textRect = NSRect(x: 0,
+                                  y: (size - textSize.height) / 2,
+                                  width: size,
+                                  height: textSize.height)
             (pctNumber as NSString).draw(in: textRect, withAttributes: attrs)
         }
     }

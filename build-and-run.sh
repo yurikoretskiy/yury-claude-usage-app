@@ -15,6 +15,8 @@ cp .build/debug/ClaudeUsage "$APP_DIR/MacOS/ClaudeUsage"
 # Copy bundled resources
 cp -f .build/debug/ClaudeUsage_ClaudeUsage.bundle/claude-logo.png "$APP_DIR/Resources/" 2>/dev/null || \
 cp -f ClaudeUsage/Resources/claude-logo.png "$APP_DIR/Resources/" 2>/dev/null || true
+cp -f .build/debug/ClaudeUsage_ClaudeUsage.bundle/claudecode-color.png "$APP_DIR/Resources/" 2>/dev/null || \
+cp -f ClaudeUsage/Resources/claudecode-color.png "$APP_DIR/Resources/" 2>/dev/null || true
 
 # Info.plist for no-dock-icon menu bar app
 cat > "$APP_DIR/Info.plist" << 'PLIST'

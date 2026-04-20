@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DetailPopover: View {
     @ObservedObject var usageService: UsageService
+    @ObservedObject var modeStore: DisplayModeStore
 
     // Orange accent for progress bars (matches menu bar widget)
     private let accentOrange = Color(red: 1.0, green: 0.6, blue: 0.0)
@@ -130,6 +131,21 @@ struct DetailPopover: View {
 
             Divider()
                 .padding(.vertical, 14)
+
+            // Display mode picker
+            HStack(spacing: 8) {
+                Text("Display")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Picker("", selection: $modeStore.displayMode) {
+                    ForEach(DisplayMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            .padding(.bottom, 10)
 
             // Footer
             HStack {
