@@ -25,7 +25,25 @@ enum MenuBarRenderer {
         return nil
     }
 
-    static func renderMenuBarImage(percentage: Double) -> NSImage {
+    /// Amber "!" badge in the top-right corner — data is stale (offline / fetch failing).
+    private static func drawStaleBadge(canvasWidth: CGFloat, canvasHeight: CGFloat) {
+        NSGraphicsContext.current?.shouldAntialias = true
+        let d: CGFloat = 9
+        let badgeRect = NSRect(x: canvasWidth - d - 1, y: canvasHeight - d - 1, width: d, height: d)
+        NSColor.systemYellow.setFill()
+        NSBezierPath(ovalIn: badgeRect).fill()
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 7, weight: .heavy),
+            .foregroundColor: NSColor.black
+        ]
+        let mark = "!" as NSString
+        let size = mark.size(withAttributes: attrs)
+        mark.draw(at: NSPoint(x: badgeRect.midX - size.width / 2,
+                              y: badgeRect.midY - size.height / 2),
+                  withAttributes: attrs)
+    }
+
+    static func renderMenuBarImage(percentage: Double, stale: Bool = false) -> NSImage {
         let height: CGFloat = 22
 
         // Pre-calculate percentage text width
@@ -114,6 +132,10 @@ enum MenuBarRenderer {
             x += numSize.width + 1
             let symY = numY + (numSize.height - pctSymSize.height) / 2 + 1
             ("%" as NSString).draw(at: NSPoint(x: x, y: symY), withAttributes: symAttrs)
+
+            if stale {
+                drawStaleBadge(canvasWidth: totalWidth, canvasHeight: height)
+            }
         }
 
         return image
@@ -157,7 +179,7 @@ enum MenuBarRenderer {
     /// side with a pin notch → across bottom with 4 leg notches (2 on left,
     /// 2 on right, middle gap) → up left side with a pin notch → close.
     /// Digit rendering is unchanged for now.
-    static func renderCompactMenuBarImage(percentage: Double) -> NSImage {
+    static func renderCompactMenuBarImage(percentage: Double, stale: Bool = false) -> NSImage {
         let width: CGFloat = 32
         let height: CGFloat = 22
 
@@ -274,6 +296,10 @@ enum MenuBarRenderer {
                 height: lineHeight
             )
             (pctNumber as NSString).draw(in: rect, withAttributes: numAttrs)
+
+            if stale {
+                drawStaleBadge(canvasWidth: width, canvasHeight: height)
+            }
         }
     }
 }

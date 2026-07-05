@@ -210,7 +210,15 @@ class UsageService: ObservableObject {
             refreshInterval = min(refreshInterval * 2, maxInterval)
             cuLog("EXIT: network backoff, next interval=\(Int(refreshInterval))")
             startPolling(fetchImmediately: false)
-            if usage.lastFetched == nil {
+            // Always surface the failure — stale data shown as fresh is worse
+            // than a visible warning (popover row + menu bar badge).
+            let offlineCodes: [URLError.Code] = [
+                .notConnectedToInternet, .networkConnectionLost, .dnsLookupFailed,
+                .cannotFindHost, .cannotConnectToHost, .timedOut, .dataNotAllowed
+            ]
+            if let urlError = error as? URLError, offlineCodes.contains(urlError.code) {
+                usage.error = "No internet connection — showing last known data"
+            } else {
                 usage.error = "Network error: \(error.localizedDescription)"
             }
         }

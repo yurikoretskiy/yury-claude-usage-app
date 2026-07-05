@@ -17,9 +17,10 @@ struct ClaudeUsageApp: App {
             DetailPopover(usageService: usageService, modeStore: modeStore)
         } label: {
             let pct = usageService.usage.sessionPercent
+            let stale = usageService.usage.error != nil
             Image(nsImage: modeStore.effectiveMode == .compact
-                  ? MenuBarRenderer.renderCompactMenuBarImage(percentage: pct)
-                  : MenuBarRenderer.renderMenuBarImage(percentage: pct))
+                  ? MenuBarRenderer.renderCompactMenuBarImage(percentage: pct, stale: stale)
+                  : MenuBarRenderer.renderMenuBarImage(percentage: pct, stale: stale))
         }
         .menuBarExtraStyle(.window)
     }
