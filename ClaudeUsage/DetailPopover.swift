@@ -191,10 +191,13 @@ struct DetailPopover: View {
         if remaining <= 0 { return "Resetting soon" }
         let hours = Int(remaining) / 3600
         let minutes = (Int(remaining) % 3600) / 60
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let timeStr = formatter.string(from: resetTime)
         if hours > 0 {
-            return "Resets in \(hours) hr \(minutes) min"
+            return "Resets at \(timeStr) · in \(hours) hr \(minutes) min"
         }
-        return "Resets in \(minutes) min"
+        return "Resets at \(timeStr) · in \(minutes) min"
     }
 
     private var weeklyResetLabel: String {
