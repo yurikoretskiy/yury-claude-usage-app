@@ -37,6 +37,8 @@ struct UsageData {
     var weeklyPercent: Double = 0
     var weeklyResetTime: Date? = nil
     var modelLimits: [ModelLimit] = []
+    var creditsEnabled: Bool = false
+    var creditsPercent: Double? = nil
     var lastFetched: Date? = nil
     var error: String? = nil
 }
@@ -245,18 +247,54 @@ class UsageService: ObservableObject {
             }
         }
 
-        // Parse any model-specific weekly limits (e.g. seven_day_sonnet, seven_day_opus)
+        // Parse per-model weekly limits from the newer `limits[]` array — this is the
+        // only place scoped models (e.g. Fable) currently surface; the legacy
+        // `seven_day_<model>` keys stay null even when a scoped limit is active.
         var models: [ModelLimit] = []
-        for (key, value) in json {
-            guard key.hasPrefix("seven_day_"),
-                  let dict = value as? [String: Any],
-                  let util = dict["utilization"] as? Double else { continue }
-            let label = key.replacingOccurrences(of: "seven_day_", with: "")
-                            .replacingOccurrences(of: "_", with: " ").capitalized
-            let resetTime: Date? = (dict["resets_at"] as? String).flatMap { parseDate($0) }
-            models.append(ModelLimit(label: label, percent: util, resetTime: resetTime))
+        if let limits = json["limits"] as? [[String: Any]] {
+            for item in limits {
+                guard (item["group"] as? String) == "weekly",
+                      let scope = item["scope"] as? [String: Any],
+                      let model = scope["model"] as? [String: Any],
+                      let label = model["display_name"] as? String,
+                      let percent = asDouble(item["percent"]) else { continue }
+                let resetTime: Date? = (item["resets_at"] as? String).flatMap { parseDate($0) }
+                models.append(ModelLimit(label: label, percent: percent, resetTime: resetTime))
+            }
+        }
+
+        // Fallback: legacy seven_day_* prefix scan, for API responses without `limits[]`.
+        if models.isEmpty {
+            for (key, value) in json {
+                guard key.hasPrefix("seven_day_"),
+                      let dict = value as? [String: Any],
+                      let util = dict["utilization"] as? Double else { continue }
+                let label = key.replacingOccurrences(of: "seven_day_", with: "")
+                                .replacingOccurrences(of: "_", with: " ").capitalized
+                let resetTime: Date? = (dict["resets_at"] as? String).flatMap { parseDate($0) }
+                models.append(ModelLimit(label: label, percent: util, resetTime: resetTime))
+            }
         }
         usage.modelLimits = models.sorted { $0.label < $1.label }
+
+        // Parse usage credits — prefer `spend` (percent + enabled), fall back to `extra_usage`.
+        // Dollar amounts are intentionally not parsed: the widget only ever shows a percentage.
+        if let spend = json["spend"] as? [String: Any] {
+            usage.creditsEnabled = (spend["enabled"] as? Bool) ?? false
+            usage.creditsPercent = asDouble(spend["percent"])
+        } else if let extra = json["extra_usage"] as? [String: Any] {
+            usage.creditsEnabled = (extra["is_enabled"] as? Bool) ?? false
+            usage.creditsPercent = asDouble(extra["utilization"])
+        } else {
+            usage.creditsEnabled = false
+            usage.creditsPercent = nil
+        }
+    }
+
+    /// JSONSerialization can hand back a whole-number percent (e.g. `81`) as an Int-backed
+    /// NSNumber, which a plain `as? Double` cast silently fails on — normalize through NSNumber.
+    private func asDouble(_ value: Any?) -> Double? {
+        (value as? NSNumber)?.doubleValue
     }
 
     private func parseDate(_ string: String) -> Date? {
@@ -295,6 +333,12 @@ class UsageService: ObservableObject {
             return d
         }
         defaults.set(models, forKey: "cu_modelLimits")
+        defaults.set(usage.creditsEnabled, forKey: "cu_creditsEnabled")
+        if let cp = usage.creditsPercent {
+            defaults.set(cp, forKey: "cu_creditsPercent")
+        } else {
+            defaults.removeObject(forKey: "cu_creditsPercent")
+        }
     }
 
     private func loadCachedUsage() {
@@ -317,6 +361,10 @@ class UsageService: ObservableObject {
                 let resetTime = (d["resetTime"] as? TimeInterval).map { Date(timeIntervalSince1970: $0) }
                 return ModelLimit(label: label, percent: percent, resetTime: resetTime)
             }
+        }
+        usage.creditsEnabled = defaults.bool(forKey: "cu_creditsEnabled")
+        if defaults.object(forKey: "cu_creditsPercent") != nil {
+            usage.creditsPercent = defaults.double(forKey: "cu_creditsPercent")
         }
         cuLog("Loaded cached usage: session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
     }

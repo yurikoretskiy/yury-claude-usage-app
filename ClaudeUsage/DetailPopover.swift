@@ -3,11 +3,38 @@ import SwiftUI
 struct DetailPopover: View {
     @ObservedObject var usageService: UsageService
     @ObservedObject var modeStore: DisplayModeStore
+    @ObservedObject var styleStore: WidgetStyleStore
+
+    @AppStorage("cu_creditsFolded") private var creditsFolded: Bool = true
 
     // Orange accent for progress bars (matches menu bar widget)
     private let accentOrange = Color(red: 1.0, green: 0.6, blue: 0.0)
 
     var body: some View {
+        Group {
+            switch styleStore.style {
+            case .native:
+                content
+            case .glass:
+                glassBackground { content }
+            }
+        }
+    }
+
+    /// Liquid Glass on macOS 26+ (Tahoe); a translucent material on older systems that
+    /// still run this app's macOS 13 minimum deployment target.
+    @ViewBuilder
+    private func glassBackground<Inner: View>(@ViewBuilder _ inner: () -> Inner) -> some View {
+        if #available(macOS 26.0, *) {
+            inner()
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        } else {
+            inner()
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Plan usage limits header
             Text("Plan usage limits")
@@ -38,24 +65,7 @@ struct DetailPopover: View {
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
 
-                HStack(spacing: 12) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.secondary.opacity(0.2))
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(accentOrange)
-                                .frame(width: max(0, geo.size.width * min(usageService.usage.sessionPercent, 100) / 100))
-                        }
-                    }
-                    .frame(height: 8)
-
-                    Text("\(Int(round(usageService.usage.sessionPercent)))% used")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                        .fixedSize()
-                }
-                .padding(.top, 4)
+                usageBar(percent: usageService.usage.sessionPercent)
             }
 
             Divider()
@@ -76,26 +86,9 @@ struct DetailPopover: View {
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
 
-                HStack(spacing: 12) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.secondary.opacity(0.2))
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(accentOrange)
-                                .frame(width: max(0, geo.size.width * min(usageService.usage.weeklyPercent, 100) / 100))
-                        }
-                    }
-                    .frame(height: 8)
+                usageBar(percent: usageService.usage.weeklyPercent)
 
-                    Text("\(Int(round(usageService.usage.weeklyPercent)))% used")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                        .fixedSize()
-                }
-                .padding(.top, 4)
-
-                // Model-specific limits (e.g. Sonnet, Opus)
+                // Model-specific limits (e.g. Fable, Sonnet, Opus)
                 ForEach(Array(usageService.usage.modelLimits.enumerated()), id: \.offset) { _, model in
                     Text(model.label)
                         .font(.system(size: 14, weight: .semibold))
@@ -108,31 +101,20 @@ struct DetailPopover: View {
                             .foregroundColor(.secondary)
                     }
 
-                    HStack(spacing: 12) {
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.secondary.opacity(0.2))
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(accentOrange)
-                                    .frame(width: max(0, geo.size.width * min(model.percent, 100) / 100))
-                            }
-                        }
-                        .frame(height: 8)
-
-                        Text("\(Int(round(model.percent)))% used")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                            .fixedSize()
-                    }
-                    .padding(.top, 4)
+                    usageBar(percent: model.percent)
                 }
+            }
+
+            if usageService.usage.creditsEnabled {
+                Divider()
+                    .padding(.vertical, 14)
+                creditsSection
             }
 
             Divider()
                 .padding(.vertical, 14)
 
-            // Display mode picker
+            // Display size picker
             HStack(spacing: 8) {
                 Text("Display")
                     .font(.system(size: 12))
@@ -140,6 +122,21 @@ struct DetailPopover: View {
                 Picker("", selection: $modeStore.displayMode) {
                     ForEach(DisplayMode.allCases) { mode in
                         Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            .padding(.bottom, 10)
+
+            // Style picker (Current / Liquid Glass)
+            HStack(spacing: 8) {
+                Text("Style")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Picker("", selection: $styleStore.style) {
+                    ForEach(WidgetStyle.allCases) { style in
+                        Text(style.label).tag(style)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -181,6 +178,53 @@ struct DetailPopover: View {
         }
         .padding(20)
         .frame(width: 300)
+    }
+
+    /// Foldable, collapsed by default. The dollar amount is intentionally never shown —
+    /// only the percentage — this widget is for glancing, not for managing spend.
+    private var creditsSection: some View {
+        DisclosureGroup(
+            isExpanded: Binding(
+                get: { !creditsFolded },
+                set: { creditsFolded = !$0 }
+            )
+        ) {
+            VStack(alignment: .leading, spacing: 4) {
+                if let percent = usageService.usage.creditsPercent {
+                    usageBar(percent: percent)
+                        .padding(.top, 8)
+                }
+                Link("Manage credits", destination: URL(string: "https://claude.ai/settings/usage")!)
+                    .font(.system(size: 12.5))
+                    .padding(.top, 8)
+            }
+        } label: {
+            Text("Usage credits")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.primary)
+        }
+    }
+
+    /// Shared progress-bar row (track + orange fill + "N% used" label).
+    private func usageBar(percent: Double) -> some View {
+        HStack(spacing: 12) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.secondary.opacity(0.2))
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(accentOrange)
+                        .frame(width: max(0, geo.size.width * min(percent, 100) / 100))
+                }
+            }
+            .frame(height: 8)
+
+            Text("\(Int(round(percent)))% used")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+                .fixedSize()
+        }
+        .padding(.top, 4)
     }
 
     private var sessionResetLabel: String {
