@@ -31,14 +31,27 @@ struct ModelLimit {
     let resetTime: Date?
 }
 
+/// Credits are not a simple on/off: when the monthly cap is exhausted the API reports
+/// `enabled: false` with `disabled_reason: "org_level_disabled_until"` even though the
+/// user's claude.ai toggle is still ON — mapping that to "Off" showed the opposite of
+/// the truth. Keep it a distinct state.
+enum CreditsState: String {
+    case on
+    case limitReached
+    case off
+}
+
 struct UsageData {
     var sessionPercent: Double = 0
     var sessionResetTime: Date? = nil
     var weeklyPercent: Double = 0
     var weeklyResetTime: Date? = nil
     var modelLimits: [ModelLimit] = []
-    var creditsEnabled: Bool = false
+    var creditsState: CreditsState = .off
+    var creditsCritical: Bool = false
     var creditsPercent: Double? = nil
+    var creditsUsedDollars: Double? = nil
+    var creditsLimitDollars: Double? = nil
     var lastFetched: Date? = nil
     var error: String? = nil
 }
@@ -277,18 +290,49 @@ class UsageService: ObservableObject {
         }
         usage.modelLimits = models.sorted { $0.label < $1.label }
 
-        // Parse usage credits — prefer `spend` (percent + enabled), fall back to `extra_usage`.
-        // Dollar amounts are intentionally not parsed: the widget only ever shows a percentage.
+        // Parse usage credits — prefer `spend` (percent + enabled + dollar figures),
+        // fall back to `extra_usage`. Balance and auto-reload state aren't in this API
+        // at all (both come back null), so they're never shown.
         if let spend = json["spend"] as? [String: Any] {
-            usage.creditsEnabled = (spend["enabled"] as? Bool) ?? false
+            usage.creditsState = creditsState(
+                enabled: (spend["enabled"] as? Bool) ?? false,
+                disabledReason: spend["disabled_reason"] as? String
+            )
+            usage.creditsCritical = (spend["severity"] as? String) == "critical"
             usage.creditsPercent = asDouble(spend["percent"])
+            usage.creditsUsedDollars = dollarAmount(spend["used"] as? [String: Any])
+            usage.creditsLimitDollars = dollarAmount(spend["limit"] as? [String: Any])
         } else if let extra = json["extra_usage"] as? [String: Any] {
-            usage.creditsEnabled = (extra["is_enabled"] as? Bool) ?? false
-            usage.creditsPercent = asDouble(extra["utilization"])
+            usage.creditsState = creditsState(
+                enabled: (extra["is_enabled"] as? Bool) ?? false,
+                disabledReason: extra["disabled_reason"] as? String
+            )
+            let percent = asDouble(extra["utilization"])
+            usage.creditsCritical = (percent ?? 0) >= 90
+            usage.creditsPercent = percent
+            usage.creditsUsedDollars = asDouble(extra["used_credits"])
+            usage.creditsLimitDollars = asDouble(extra["monthly_limit"])
         } else {
-            usage.creditsEnabled = false
+            usage.creditsState = .off
+            usage.creditsCritical = false
             usage.creditsPercent = nil
+            usage.creditsUsedDollars = nil
+            usage.creditsLimitDollars = nil
         }
+    }
+
+    private func creditsState(enabled: Bool, disabledReason: String?) -> CreditsState {
+        if enabled { return .on }
+        // "org_level_disabled_until" = spending suspended because the cap was exhausted,
+        // not because the user toggled credits off.
+        if disabledReason == "org_level_disabled_until" { return .limitReached }
+        return .off
+    }
+
+    private func dollarAmount(_ obj: [String: Any]?) -> Double? {
+        guard let obj, let minor = asDouble(obj["amount_minor"]) else { return nil }
+        let exponent = (obj["exponent"] as? Int) ?? 2
+        return minor / pow(10, Double(exponent))
     }
 
     /// JSONSerialization can hand back a whole-number percent (e.g. `81`) as an Int-backed
@@ -333,11 +377,22 @@ class UsageService: ObservableObject {
             return d
         }
         defaults.set(models, forKey: "cu_modelLimits")
-        defaults.set(usage.creditsEnabled, forKey: "cu_creditsEnabled")
+        defaults.set(usage.creditsState.rawValue, forKey: "cu_creditsState")
+        defaults.set(usage.creditsCritical, forKey: "cu_creditsCritical")
         if let cp = usage.creditsPercent {
             defaults.set(cp, forKey: "cu_creditsPercent")
         } else {
             defaults.removeObject(forKey: "cu_creditsPercent")
+        }
+        if let used = usage.creditsUsedDollars {
+            defaults.set(used, forKey: "cu_creditsUsedDollars")
+        } else {
+            defaults.removeObject(forKey: "cu_creditsUsedDollars")
+        }
+        if let limit = usage.creditsLimitDollars {
+            defaults.set(limit, forKey: "cu_creditsLimitDollars")
+        } else {
+            defaults.removeObject(forKey: "cu_creditsLimitDollars")
         }
     }
 
@@ -362,9 +417,19 @@ class UsageService: ObservableObject {
                 return ModelLimit(label: label, percent: percent, resetTime: resetTime)
             }
         }
-        usage.creditsEnabled = defaults.bool(forKey: "cu_creditsEnabled")
+        if let raw = defaults.string(forKey: "cu_creditsState"),
+           let state = CreditsState(rawValue: raw) {
+            usage.creditsState = state
+        }
+        usage.creditsCritical = defaults.bool(forKey: "cu_creditsCritical")
         if defaults.object(forKey: "cu_creditsPercent") != nil {
             usage.creditsPercent = defaults.double(forKey: "cu_creditsPercent")
+        }
+        if defaults.object(forKey: "cu_creditsUsedDollars") != nil {
+            usage.creditsUsedDollars = defaults.double(forKey: "cu_creditsUsedDollars")
+        }
+        if defaults.object(forKey: "cu_creditsLimitDollars") != nil {
+            usage.creditsLimitDollars = defaults.double(forKey: "cu_creditsLimitDollars")
         }
         cuLog("Loaded cached usage: session=\(Int(usage.sessionPercent))% weekly=\(Int(usage.weeklyPercent))%")
     }

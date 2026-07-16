@@ -3,7 +3,6 @@ import SwiftUI
 struct DetailPopover: View {
     @ObservedObject var usageService: UsageService
     @ObservedObject var modeStore: DisplayModeStore
-    @ObservedObject var styleStore: WidgetStyleStore
 
     @AppStorage("cu_creditsFolded") private var creditsFolded: Bool = true
 
@@ -11,30 +10,6 @@ struct DetailPopover: View {
     private let accentOrange = Color(red: 1.0, green: 0.6, blue: 0.0)
 
     var body: some View {
-        Group {
-            switch styleStore.style {
-            case .native:
-                content
-            case .glass:
-                glassBackground { content }
-            }
-        }
-    }
-
-    /// Liquid Glass on macOS 26+ (Tahoe); a translucent material on older systems that
-    /// still run this app's macOS 13 minimum deployment target.
-    @ViewBuilder
-    private func glassBackground<Inner: View>(@ViewBuilder _ inner: () -> Inner) -> some View {
-        if #available(macOS 26.0, *) {
-            inner()
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        } else {
-            inner()
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-    }
-
-    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Plan usage limits header
             Text("Plan usage limits")
@@ -105,11 +80,9 @@ struct DetailPopover: View {
                 }
             }
 
-            if usageService.usage.creditsEnabled {
-                Divider()
-                    .padding(.vertical, 14)
-                creditsSection
-            }
+            Divider()
+                .padding(.vertical, 14)
+            creditsSection
 
             Divider()
                 .padding(.vertical, 14)
@@ -122,21 +95,6 @@ struct DetailPopover: View {
                 Picker("", selection: $modeStore.displayMode) {
                     ForEach(DisplayMode.allCases) { mode in
                         Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-            .padding(.bottom, 10)
-
-            // Style picker (Current / Liquid Glass)
-            HStack(spacing: 8) {
-                Text("Style")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                Picker("", selection: $styleStore.style) {
-                    ForEach(WidgetStyle.allCases) { style in
-                        Text(style.label).tag(style)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -180,40 +138,85 @@ struct DetailPopover: View {
         .frame(width: 300)
     }
 
-    /// Foldable, collapsed by default. The dollar amount is intentionally never shown —
-    /// only the percentage — this widget is for glancing, not for managing spend.
+    /// Always shown, fold state persisted independent of on/off — the status badge in the
+    /// header is the thing to glance at (it's easy to forget credits are left enabled);
+    /// unfolding always reveals whatever detail is available regardless of that state.
+    /// The whole header row is one button — the bare DisclosureGroup chevron was too
+    /// small a click target.
     private var creditsSection: some View {
-        DisclosureGroup(
-            isExpanded: Binding(
-                get: { !creditsFolded },
-                set: { creditsFolded = !$0 }
-            )
-        ) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
+            Button(action: { creditsFolded.toggle() }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .rotationEffect(.degrees(creditsFolded ? 0 : 90))
+                    Text("Usage credits")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    creditsBadge
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if !creditsFolded {
                 if let percent = usageService.usage.creditsPercent {
-                    usageBar(percent: percent)
+                    usageBar(percent: percent, critical: usageService.usage.creditsCritical)
                         .padding(.top, 8)
+                }
+                if let used = usageService.usage.creditsUsedDollars,
+                   let limit = usageService.usage.creditsLimitDollars {
+                    Text("\(dollarString(used)) of \(dollarString(limit))")
+                        .font(.system(size: 12.5))
+                        .foregroundColor(.secondary)
                 }
                 Link("Manage credits", destination: URL(string: "https://claude.ai/settings/usage")!)
                     .font(.system(size: 12.5))
                     .padding(.top, 8)
             }
-        } label: {
-            Text("Usage credits")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.primary)
         }
     }
 
+    /// On = orange dot (worth noticing you left it on). Limit reached = red, loudest —
+    /// credits ran dry, the claude.ai toggle is still ON. Off = gray, ignorable.
+    private var creditsBadge: some View {
+        let (dot, label, labelColor, weight): (Color, String, Color, Font.Weight) = {
+            switch usageService.usage.creditsState {
+            case .on:
+                return (accentOrange, "On", .primary, .semibold)
+            case .limitReached:
+                return (.red, "Limit reached", .red, .semibold)
+            case .off:
+                return (Color.secondary.opacity(0.35), "Off", .secondary, .regular)
+            }
+        }()
+        return HStack(spacing: 5) {
+            Circle()
+                .fill(dot)
+                .frame(width: 6, height: 6)
+            Text(label)
+                .font(.system(size: 12, weight: weight))
+                .foregroundColor(labelColor)
+        }
+    }
+
+    private func dollarString(_ amount: Double) -> String {
+        "$" + String(format: "%.2f", amount)
+    }
+
     /// Shared progress-bar row (track + orange fill + "N% used" label).
-    private func usageBar(percent: Double) -> some View {
+    /// `critical` turns the fill red — used when the API flags spend severity critical,
+    /// matching the red bar claude.ai shows once credits are (nearly) exhausted.
+    private func usageBar(percent: Double, critical: Bool = false) -> some View {
         HStack(spacing: 12) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color.secondary.opacity(0.2))
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(accentOrange)
+                        .fill(critical ? Color.red : accentOrange)
                         .frame(width: max(0, geo.size.width * min(percent, 100) / 100))
                 }
             }

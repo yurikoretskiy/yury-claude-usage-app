@@ -5,7 +5,6 @@ import AppKit
 struct ClaudeUsageApp: App {
     @StateObject private var usageService = UsageService()
     @StateObject private var modeStore = DisplayModeStore()
-    @StateObject private var styleStore = WidgetStyleStore()
 
     // Prevent App Nap from freezing our polling timer when terminal is closed
     private let activity = ProcessInfo.processInfo.beginActivity(
@@ -15,7 +14,7 @@ struct ClaudeUsageApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            DetailPopover(usageService: usageService, modeStore: modeStore, styleStore: styleStore)
+            DetailPopover(usageService: usageService, modeStore: modeStore)
         } label: {
             let pct = usageService.usage.sessionPercent
             let stale = usageService.usage.error != nil
