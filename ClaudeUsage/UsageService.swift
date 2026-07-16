@@ -294,30 +294,58 @@ class UsageService: ObservableObject {
         // fall back to `extra_usage`. Balance and auto-reload state aren't in this API
         // at all (both come back null), so they're never shown.
         if let spend = json["spend"] as? [String: Any] {
-            usage.creditsState = creditsState(
+            let state = creditsState(
                 enabled: (spend["enabled"] as? Bool) ?? false,
                 disabledReason: spend["disabled_reason"] as? String
             )
+            usage.creditsState = state
             usage.creditsCritical = (spend["severity"] as? String) == "critical"
-            usage.creditsPercent = asDouble(spend["percent"])
-            usage.creditsUsedDollars = dollarAmount(spend["used"] as? [String: Any])
-            usage.creditsLimitDollars = dollarAmount(spend["limit"] as? [String: Any])
+            applyCreditsNumbers(
+                state: state,
+                percent: asDouble(spend["percent"]),
+                used: dollarAmount(spend["used"] as? [String: Any]),
+                limit: dollarAmount(spend["limit"] as? [String: Any])
+            )
         } else if let extra = json["extra_usage"] as? [String: Any] {
-            usage.creditsState = creditsState(
+            let state = creditsState(
                 enabled: (extra["is_enabled"] as? Bool) ?? false,
                 disabledReason: extra["disabled_reason"] as? String
             )
-            let percent = asDouble(extra["utilization"])
-            usage.creditsCritical = (percent ?? 0) >= 90
-            usage.creditsPercent = percent
-            usage.creditsUsedDollars = asDouble(extra["used_credits"])
-            usage.creditsLimitDollars = asDouble(extra["monthly_limit"])
+            usage.creditsState = state
+            usage.creditsCritical = (asDouble(extra["utilization"]) ?? 0) >= 90
+            applyCreditsNumbers(
+                state: state,
+                percent: asDouble(extra["utilization"]),
+                used: asDouble(extra["used_credits"]),
+                limit: asDouble(extra["monthly_limit"])
+            )
         } else {
             usage.creditsState = .off
             usage.creditsCritical = false
             usage.creditsPercent = nil
             usage.creditsUsedDollars = nil
             usage.creditsLimitDollars = nil
+        }
+    }
+
+    /// Two display corrections Yury asked for:
+    /// - Toggled OFF: the API nulls all consumption data (`used: 0, limit: null`), but the
+    ///   month's spend didn't vanish — keep the last known numbers (cache survives restarts)
+    ///   instead of overwriting with zeros.
+    /// - Limit reached: the OAuth spend counter lags web billing (showed 92% while claude.ai
+    ///   showed 100%), but exhausted means exhausted — pin the display to 100% / $limit.
+    private func applyCreditsNumbers(state: CreditsState, percent: Double?, used: Double?, limit: Double?) {
+        switch state {
+        case .off where limit == nil:
+            break // retain last known values
+        case .limitReached:
+            usage.creditsPercent = 100
+            usage.creditsLimitDollars = limit ?? usage.creditsLimitDollars
+            usage.creditsUsedDollars = usage.creditsLimitDollars ?? used
+        default:
+            usage.creditsPercent = percent
+            usage.creditsUsedDollars = used
+            usage.creditsLimitDollars = limit
         }
     }
 

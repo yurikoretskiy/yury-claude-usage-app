@@ -8,6 +8,9 @@ struct DetailPopover: View {
 
     // Orange accent for progress bars (matches menu bar widget)
     private let accentOrange = Color(red: 1.0, green: 0.6, blue: 0.0)
+    // Muted brick red matching claude.ai's exhausted-credits bar — pure .red read as
+    // too dramatic in the popover.
+    private let brickRed = Color(red: 0.76, green: 0.31, blue: 0.26)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -163,7 +166,9 @@ struct DetailPopover: View {
 
             if !creditsFolded {
                 if let percent = usageService.usage.creditsPercent {
-                    usageBar(percent: percent, critical: usageService.usage.creditsCritical)
+                    usageBar(percent: percent,
+                             critical: usageService.usage.creditsCritical,
+                             dimmed: usageService.usage.creditsState == .off)
                         .padding(.top, 8)
                 }
                 if let used = usageService.usage.creditsUsedDollars,
@@ -187,7 +192,7 @@ struct DetailPopover: View {
             case .on:
                 return (accentOrange, "On", .primary, .semibold)
             case .limitReached:
-                return (.red, "Limit reached", .red, .semibold)
+                return (brickRed, "Limit reached", brickRed, .semibold)
             case .off:
                 return (Color.secondary.opacity(0.35), "Off", .secondary, .regular)
             }
@@ -207,16 +212,16 @@ struct DetailPopover: View {
     }
 
     /// Shared progress-bar row (track + orange fill + "N% used" label).
-    /// `critical` turns the fill red — used when the API flags spend severity critical,
-    /// matching the red bar claude.ai shows once credits are (nearly) exhausted.
-    private func usageBar(percent: Double, critical: Bool = false) -> some View {
+    /// `critical` = muted brick fill (claude.ai's exhausted-credits look);
+    /// `dimmed` = gray fill for credits shown while toggled off (last-known data).
+    private func usageBar(percent: Double, critical: Bool = false, dimmed: Bool = false) -> some View {
         HStack(spacing: 12) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color.secondary.opacity(0.2))
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(critical ? Color.red : accentOrange)
+                        .fill(dimmed ? Color.secondary.opacity(0.5) : (critical ? brickRed : accentOrange))
                         .frame(width: max(0, geo.size.width * min(percent, 100) / 100))
                 }
             }
